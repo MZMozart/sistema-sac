@@ -1,0 +1,62 @@
+import { cert, getApps, initializeApp, type ServiceAccount } from 'firebase-admin/app'
+import { getAuth } from 'firebase-admin/auth'
+import { getFirestore } from 'firebase-admin/firestore'
+import fs from 'fs'
+import path from 'path'
+
+function normalizePrivateKey(value?: string) {
+  return value?.replace(/\\n/g, '\n')
+}
+
+function parseServiceAccount(raw: string): ServiceAccount {
+  const parsed = JSON.parse(raw)
+  return {
+    projectId: parsed.project_id,
+    clientEmail: parsed.client_email,
+    privateKey: normalizePrivateKey(parsed.private_key),
+  }
+}
+
+function getServiceAccount(): ServiceAccount | null {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim()
+    const decoded = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')
+    return parseServiceAccount(decoded)
+  }
+
+  if (
+    process.env.FIREBASE_ADMIN_PROJECT_ID &&
+    process.env.FIREBASE_ADMIN_CLIENT_EMAIL &&
+    process.env.FIREBASE_ADMIN_PRIVATE_KEY
+  ) {
+    return {
+      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+      privateKey: normalizePrivateKey(process.env.FIREBASE_ADMIN_PRIVATE_KEY),
+    }
+  }
+
+  const candidates = [
+    process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    path.join(process.cwd(), 'secure', 'firebase-admin.json'),
+    '/app/secure/firebase-admin.json',
+  ].filter(Boolean) as string[]
+
+  const credentialsPath = candidates.find((candidate) => fs.existsSync(candidate))
+  if (!credentialsPath) return null
+
+  return parseServiceAccount(fs.readFileSync(credentialsPath, 'utf8'))
+}
+
+const serviceAccount = getServiceAccount()
+
+const adminApp = getApps().length
+  ? getApps()[0]
+  : initializeApp(
+      serviceAccount
+        ? { credential: cert(serviceAccount) }
+        : { projectId: process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID }
+    )
+
+export const adminAuth = getAuth(adminApp)
+export const adminDb = getFirestore(adminApp)
