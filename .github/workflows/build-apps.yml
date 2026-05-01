@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   windows-desktop:
@@ -17,10 +22,29 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm run desktop:build:win
+      - name: Normalize installer name
+        shell: pwsh
+        run: |
+          $target = "dist-desktop/AtendePro-0.1.0-win-x64.exe"
+          $installer = Get-ChildItem "dist-desktop" -Filter "*.exe" | Select-Object -First 1
+          if ($installer.FullName -ne (Resolve-Path $target -ErrorAction SilentlyContinue)) {
+            Copy-Item $installer.FullName $target -Force
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: AtendePro-Windows
-          path: dist-desktop/*.exe
+          path: dist-desktop/AtendePro-0.1.0-win-x64.exe
+      - name: Publish Windows installer
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ github.ref_name }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "${{ github.ref_name }}" --title "AtendePro ${{ github.ref_name }}" --notes "Instaladores do AtendePro para Windows e Android."
+          }
+          gh release upload "${{ github.ref_name }}" "dist-desktop/AtendePro-0.1.0-win-x64.exe" --clobber
 
   android-debug:
     runs-on: ubuntu-latest
@@ -41,7 +65,15 @@ jobs:
       - run: chmod +x android/gradlew
       - run: ./gradlew assembleDebug
         working-directory: android
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/AtendePro-Android-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: AtendePro-Android-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/AtendePro-Android-debug.apk
+      - name: Publish Android APK
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "AtendePro $GITHUB_REF_NAME" --notes "Instaladores do AtendePro para Windows e Android."
+          gh release upload "$GITHUB_REF_NAME" android/app/build/outputs/apk/debug/AtendePro-Android-debug.apk --clobber

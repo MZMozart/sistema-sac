@@ -9,6 +9,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { firebaseEnvReady } from '@/lib/firebase'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Mail, Lock, ArrowLeft, Loader2 } from 'lucide-react'
 
@@ -70,6 +71,11 @@ export default function LoginPage() {
   }
 
   const handleGoogleSignIn = async (type: 'pf' | 'pj') => {
+    if (!firebaseEnvReady) {
+      toast.error('Firebase não configurado na Vercel. Cadastre as variáveis NEXT_PUBLIC_FIREBASE_* antes de usar o login Google.')
+      return
+    }
+
     setLoading(true)
     try {
       const result = await signInWithGoogle(type)
@@ -85,7 +91,7 @@ export default function LoginPage() {
       if (error.code === 'auth/popup-closed-by-user') {
         toast.error('Login cancelado')
       } else if (error.code === 'auth/popup-blocked') {
-        toast.error('Popup bloqueado. Permita popups e tente novamente.')
+        toast.error('Popup bloqueado pelo navegador. Permita popups para este site e tente novamente.')
       } else if (error.code === 'auth/unauthorized-domain') {
         toast.error('O domínio atual ainda não foi autorizado no Firebase para login Google.')
       } else {

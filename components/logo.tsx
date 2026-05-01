@@ -8,7 +8,7 @@ type LogoProps = {
   className?: string
 }
 
-const BRAND_LOGO_URL = '/apple-icon.png'
+const BRAND_LOGO_URL = '/atende.png'
 
 export function Logo({ size = 'md', showText = true, className }: LogoProps) {
   const dimensions = size === 'sm' ? 'h-12 w-12' : size === 'lg' ? 'h-20 w-20' : 'h-14 w-14'

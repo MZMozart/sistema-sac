@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { spawn } from 'child_process'
+
+const OPENAI_SPEECH_URL = 'https://api.openai.com/v1/audio/speech'
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,6 +11,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'missing-text' }, { status: 400 })
     }
 
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'missing-openai-key' }, { status: 500 })
+    }
+
     const payload = JSON.stringify({
       text: text.slice(0, 4096),
       voice: body.voice || 'alloy',
@@ -18,27 +24,21 @@ export async function POST(request: NextRequest) {
       response_format: 'mp3',
     })
 
-    const audioBuffer = await new Promise<Buffer>((resolve, reject) => {
-      const child = spawn('/root/.venv/bin/python', ['/app/scripts/generate_tts.py'], {
-        env: process.env,
-      })
-
-      const chunks: Buffer[] = []
-      const errorChunks: Buffer[] = []
-
-      child.stdout.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-      child.stderr.on('data', (chunk) => errorChunks.push(Buffer.from(chunk)))
-      child.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(Buffer.concat(errorChunks).toString() || 'tts-process-failed'))
-          return
-        }
-        resolve(Buffer.concat(chunks))
-      })
-
-      child.stdin.write(payload)
-      child.stdin.end()
+    const response = await fetch(OPENAI_SPEECH_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: payload,
     })
+
+    if (!response.ok) {
+      const detail = await response.text()
+      return NextResponse.json({ error: detail || 'tts-provider-failed' }, { status: response.status })
+    }
+
+    const audioBuffer = Buffer.from(await response.arrayBuffer())
 
     return new NextResponse(audioBuffer, {
       headers: {

@@ -1,5 +1,5 @@
 const CACHE_NAME = 'atendepro-shell-v5'
-const APP_SHELL = ['/', '/auth/login', '/manifest.webmanifest', '/apple-icon.png', '/android-chrome-192x192.png', '/android-chrome-512x512.png']
+const APP_SHELL = ['/', '/auth/login', '/manifest.webmanifest', '/atende.png', '/apple-icon.png', '/android-chrome-192x192.png', '/android-chrome-512x512.png']
 
 self.addEventListener('install', (event) => {
   self.skipWaiting()

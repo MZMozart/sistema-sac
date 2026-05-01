@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { firebaseEnvReady } from "@/lib/firebase";
 import { toast } from "sonner";
 
 type RegisterType = "pf" | "pj";
@@ -225,6 +226,10 @@ export default function RegisterPage() {
       toast.error("Escolha PF ou PJ antes de continuar com Google.");
       return;
     }
+    if (!firebaseEnvReady) {
+      toast.error("Firebase não configurado na Vercel. Cadastre as variáveis NEXT_PUBLIC_FIREBASE_* antes de usar o cadastro Google.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -233,6 +238,8 @@ export default function RegisterPage() {
     } catch (error: any) {
       if (error?.code === "auth/unauthorized-domain") {
         toast.error("O domínio atual ainda não foi autorizado no Firebase para login Google.");
+      } else if (error?.code === "auth/popup-blocked") {
+        toast.error("Popup bloqueado pelo navegador. Permita popups para este site e tente novamente.");
       } else {
         toast.error(error?.message || "Não foi possível continuar com Google.");
       }
@@ -632,4 +639,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-

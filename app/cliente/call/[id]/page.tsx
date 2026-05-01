@@ -68,11 +68,16 @@ export default function ClientCallPage() {
 
   const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || '', [company])
   const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || [], [company])
+  const botVoiceVolume = useMemo(() => {
+    const configuredVolume = Number(company?.settings?.audioSettings?.botVoiceVolume ?? 100)
+    return Math.max(0, Math.min(1, configuredVolume / 100))
+  }, [company?.settings?.audioSettings?.botVoiceVolume])
 
   const enableAudio = async () => {
+    let stream: MediaStream
     try {
       // WebRTC precisa de uma acao do usuario para liberar microfone e audio no navegador.
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           ...(company?.settings?.audioSettings?.inputDeviceId && company.settings.audioSettings.inputDeviceId !== 'default'
             ? { deviceId: { exact: company.settings.audioSettings.inputDeviceId } }
@@ -86,6 +91,15 @@ export default function ClientCallPage() {
       setAudioEnabled(true)
     } catch {
       toast.error('Permita o uso do microfone para iniciar a chamada no navegador.')
+      return
+    }
+
+    if (callBotGreeting && !spokenRef.current && session?.status !== 'active' && session?.status !== 'ended') {
+      speakText(callBotGreeting).then(() => {
+        spokenRef.current = true
+      }).catch(() => {
+        toast.error('Não foi possível tocar a voz automática da ligação agora.')
+      })
     }
   }
 
@@ -111,7 +125,7 @@ export default function ClientCallPage() {
     const audioUrl = URL.createObjectURL(blob)
     if (ttsAudioRef.current) {
       ttsAudioRef.current.src = audioUrl
-      ttsAudioRef.current.volume = 1
+      ttsAudioRef.current.volume = botVoiceVolume
       await ttsAudioRef.current.play()
     }
   }
