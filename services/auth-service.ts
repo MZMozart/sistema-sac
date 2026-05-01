@@ -1,8 +1,11 @@
 import {
+  browserLocalPersistence,
   browserSessionPersistence,
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -24,9 +27,86 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firest
 import { auth, db, googleProvider, appleProvider } from '@/lib/firebase'
 import type { User, AccountType, Company } from '@/lib/types'
 
+const googleRedirectAccountTypeKey = 'atendepro.googleRedirect.accountType'
+
 export class AuthService {
   static async ensureTabScopedSession() {
     await setPersistence(auth, browserSessionPersistence)
+  }
+
+  static shouldUseGoogleRedirect() {
+    if (typeof window === 'undefined') return false
+
+    const userAgent = window.navigator.userAgent || ''
+    const isAndroidWebView = /Android/i.test(userAgent) && /\bwv\b|Version\/[\d.]+/i.test(userAgent)
+    const isInstalledWebApp =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+
+    return isAndroidWebView || isInstalledWebApp
+  }
+
+  static async ensureDeviceScopedSession() {
+    await setPersistence(auth, browserLocalPersistence)
+  }
+
+  static getPendingGoogleRedirectType(): AccountType | null {
+    if (typeof window === 'undefined') return null
+    try {
+      return window.localStorage.getItem(googleRedirectAccountTypeKey) as AccountType | null
+    } catch {
+      return null
+    }
+  }
+
+  static clearPendingGoogleRedirectType() {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.removeItem(googleRedirectAccountTypeKey)
+    } catch {
+      // Storage can be unavailable in restricted WebViews.
+    }
+  }
+
+  private static async persistGoogleUser(firebaseUser: FirebaseUser, accountType?: AccountType) {
+    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
+
+    if (!userDoc.exists()) {
+      const newUser: Omit<User, 'uid' | 'createdAt'> = {
+        name: firebaseUser.displayName || '',
+        email: firebaseUser.email || '',
+        phone: firebaseUser.phoneNumber || '',
+        accountType: accountType || 'pf',
+        role: accountType === 'pj' ? 'owner' : 'client',
+        photoURL: firebaseUser.photoURL || undefined,
+        emailVerified: firebaseUser.emailVerified,
+        phoneVerified: !!firebaseUser.phoneNumber,
+        connectedAccounts: ['google'],
+      }
+
+      await setDoc(doc(db, 'users', firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        ...newUser,
+        createdAt: serverTimestamp(),
+      })
+    }
+  }
+
+  static async completeGoogleRedirectSignIn(): Promise<FirebaseUser | null> {
+    const pendingAccountType = this.getPendingGoogleRedirectType()
+    if (!pendingAccountType) return null
+
+    await this.ensureDeviceScopedSession()
+    const result = await getRedirectResult(auth)
+
+    if (!result?.user) {
+      this.clearPendingGoogleRedirectType()
+      return null
+    }
+
+    await this.persistGoogleUser(result.user, pendingAccountType)
+    this.clearPendingGoogleRedirectType()
+    return result.user
   }
 
   // Email and Password Authentication
@@ -87,33 +167,22 @@ export class AuthService {
   // Google Authentication
   static async signInWithGoogle(accountType?: AccountType): Promise<FirebaseUser> {
     try {
-      await this.ensureTabScopedSession()
+      if (this.shouldUseGoogleRedirect()) {
+        await this.ensureDeviceScopedSession()
+        try {
+          window.localStorage.setItem(googleRedirectAccountTypeKey, accountType || 'pf')
+        } catch {
+          throw Object.assign(new Error('auth/web-storage-unavailable'), { code: 'auth/web-storage-unavailable' })
+        }
+        await signInWithRedirect(auth, googleProvider)
+        return await new Promise<FirebaseUser>(() => undefined)
+      }
+
+      await this.ensureDeviceScopedSession()
       const result = await signInWithPopup(auth, googleProvider)
       const firebaseUser = result.user
 
-      // Check if user exists in Firestore
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
-
-      if (!userDoc.exists()) {
-        // Create new user
-        const newUser: Omit<User, 'uid' | 'createdAt'> = {
-          name: firebaseUser.displayName || '',
-          email: firebaseUser.email || '',
-          phone: firebaseUser.phoneNumber || '',
-          accountType: accountType || 'pf',
-          role: accountType === 'pj' ? 'owner' : 'client',
-          photoURL: firebaseUser.photoURL || undefined,
-          emailVerified: firebaseUser.emailVerified,
-          phoneVerified: !!firebaseUser.phoneNumber,
-          connectedAccounts: ['google'],
-        }
-
-        await setDoc(doc(db, 'users', firebaseUser.uid), {
-          uid: firebaseUser.uid,
-          ...newUser,
-          createdAt: serverTimestamp(),
-        })
-      }
+      await this.persistGoogleUser(firebaseUser, accountType)
 
       return firebaseUser
     } catch (error) {

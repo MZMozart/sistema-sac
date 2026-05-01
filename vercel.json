@@ -1,4 +1,10 @@
 {
   "installCommand": "npm install",
-  "buildCommand": "npm run build"
+  "buildCommand": "npm run build",
+  "rewrites": [
+    {
+      "source": "/__/auth/:path*",
+      "destination": "https://sistema-atendimento-global.firebaseapp.com/__/auth/:path*"
+    }
+  ]
 }

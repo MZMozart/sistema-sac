@@ -231,8 +231,10 @@ export const firestore = {
 }
 
 const createUserWithEmailAndPassword = vi.fn()
+const getRedirectResult = vi.fn()
 const signInWithEmailAndPassword = vi.fn()
 const signInWithPopup = vi.fn()
+const signInWithRedirect = vi.fn()
 const signOut = vi.fn()
 const sendEmailVerification = vi.fn()
 const sendPasswordResetEmail = vi.fn()
@@ -246,8 +248,10 @@ const setPersistence = vi.fn()
 
 export const authMocks = {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -261,10 +265,13 @@ export const authMocks = {
 }
 
 export const firebaseAuth = {
+  browserLocalPersistence: { type: 'browserLocalPersistence' },
   browserSessionPersistence: { type: 'browserSessionPersistence' },
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -279,4 +286,3 @@ export const firebaseAuth = {
   OAuthProvider: vi.fn(() => appleProvider),
   RecaptchaVerifier: vi.fn(),
 }
-

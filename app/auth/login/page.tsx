@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
@@ -23,6 +23,14 @@ export default function LoginPage() {
   const [twoFactorRequired, setTwoFactorRequired] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('googleAuthError') === 'storage') {
+      toast.error('NÃ£o foi possÃ­vel concluir o login Google neste navegador. Tente novamente ou entre com email e senha.')
+      router.replace('/auth/login')
+    }
+  }, [router])
 
   const handleResetTabSession = async () => {
     setLoading(true)
@@ -94,6 +102,8 @@ export default function LoginPage() {
         toast.error('Popup bloqueado pelo navegador. Permita popups para este site e tente novamente.')
       } else if (error.code === 'auth/unauthorized-domain') {
         toast.error('O domínio atual ainda não foi autorizado no Firebase para login Google.')
+      } else if (error.code === 'auth/web-storage-unavailable' || String(error.message || '').includes('missing initial state')) {
+        toast.error('O navegador do aplicativo bloqueou o armazenamento necessário para o Google. Tente novamente ou entre com email e senha.')
       } else {
         toast.error('Erro ao fazer login com Google')
       }

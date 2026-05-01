@@ -90,6 +90,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (!AuthService.getPendingGoogleRedirectType()) return
+
+    let cancelled = false
+    setLoading(true)
+
+    AuthService.completeGoogleRedirectSignIn()
+      .then(async (firebaseUser) => {
+        if (!firebaseUser || cancelled) return
+        setUser(firebaseUser)
+        const data = await fetchUserData(firebaseUser)
+        const userType = getUserType(data, employee)
+
+        if ((data as any)?.twoFactorEnabled) {
+          sessionStorage.setItem('twoFactorPending', '1')
+          sessionStorage.setItem('twoFactorPendingType', userType)
+          window.location.href = '/auth/login'
+          return
+        }
+
+        await finalizeAuthenticatedFlow(firebaseUser, data)
+      })
+      .catch((error) => {
+        console.error('Google redirect sign in error:', error)
+        AuthService.clearPendingGoogleRedirectType()
+        window.location.href = '/auth/login?googleAuthError=storage'
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const isProfileIncomplete = (data: User | null) => {
     if (!data) return false
     if (data.accountType === 'pf') {

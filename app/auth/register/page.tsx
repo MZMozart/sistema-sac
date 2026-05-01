@@ -240,6 +240,8 @@ export default function RegisterPage() {
         toast.error("O domínio atual ainda não foi autorizado no Firebase para login Google.");
       } else if (error?.code === "auth/popup-blocked") {
         toast.error("Popup bloqueado pelo navegador. Permita popups para este site e tente novamente.");
+      } else if (error?.code === "auth/web-storage-unavailable" || String(error?.message || "").includes("missing initial state")) {
+        toast.error("O navegador do aplicativo bloqueou o armazenamento necessário para o Google. Tente novamente ou entre com email e senha.");
       } else {
         toast.error(error?.message || "Não foi possível continuar com Google.");
       }
