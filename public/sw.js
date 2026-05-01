@@ -1,11 +1,16 @@
-const CACHE_NAME = 'atendepro-shell-v7'
+const CACHE_NAME = 'atendepro-shell-v8'
 const APP_SHELL = ['/', '/auth/login', '/manifest.webmanifest', '/brand/atendepro-logo.png', '/brand/atendepro-icon-192.png', '/brand/atendepro-icon-512.png']
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting()
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   )
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
 })
 
 self.addEventListener('activate', (event) => {
