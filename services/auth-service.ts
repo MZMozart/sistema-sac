@@ -6,6 +6,7 @@ import {
   signOut as firebaseSignOut,
   sendEmailVerification,
   sendPasswordResetEmail,
+  fetchSignInMethodsForEmail,
   confirmPasswordReset,
   updateProfile,
   updateEmail as firebaseUpdateEmail,
@@ -225,6 +226,7 @@ export class AuthService {
   // Password Reset
   static async resetPassword(email: string): Promise<void> {
     try {
+      const normalizedEmail = email.trim().toLowerCase()
       const actionCodeSettings = typeof window !== 'undefined'
         ? {
             url: `${window.location.origin}/auth/login`,
@@ -232,7 +234,12 @@ export class AuthService {
           }
         : undefined
 
-      await sendPasswordResetEmail(auth, email, actionCodeSettings)
+      const signInMethods = await fetchSignInMethodsForEmail(auth, normalizedEmail).catch(() => null)
+      if (signInMethods && signInMethods.length > 0 && !signInMethods.includes('password')) {
+        throw new Error('auth/no-password-provider')
+      }
+
+      await sendPasswordResetEmail(auth, normalizedEmail, actionCodeSettings)
     } catch (error) {
       console.error('Password reset error:', error)
       throw error

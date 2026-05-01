@@ -22,7 +22,7 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: public/android-chrome-512x512.png
+  icon: public/brand/atendepro-icon-512.png
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

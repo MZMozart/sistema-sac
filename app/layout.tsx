@@ -29,9 +29,9 @@ export const metadata = {
   title: "AtendePro",
   description: "Plataforma premium de atendimento multiempresa com chat, voz e analytics.",
   icons: {
-    icon: "/atende.png",
-    shortcut: "/atende.png",
-    apple: "/atende.png",
+    icon: "/brand/atendepro-icon-512.png",
+    shortcut: "/brand/atendepro-icon-32.png",
+    apple: "/brand/atendepro-icon-180.png",
   },
 };
 

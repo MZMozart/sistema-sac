@@ -22,9 +22,17 @@ export default function ForgotPasswordPage() {
     setLoading(true)
     try {
       await resetPassword(email)
-      toast.success('Email de recuperação enviado com sucesso.')
+      toast.success('Se esta conta usa email e senha, o link de redefinição será enviado em instantes.')
     } catch (error: any) {
-      toast.error(error?.message || 'Não foi possível enviar o email de recuperação.')
+      if (error?.message === 'auth/no-password-provider') {
+        toast.error('Esta conta não usa senha cadastrada. Entre usando o mesmo provedor usado no cadastro, como Google.')
+      } else if (error?.code === 'auth/invalid-email') {
+        toast.error('Informe um email válido para receber o link de redefinição.')
+      } else if (error?.code === 'auth/unauthorized-continue-uri') {
+        toast.error('O domínio do AtendePro precisa estar autorizado no Firebase para enviar links de redefinição.')
+      } else {
+        toast.error(error?.message || 'Não foi possível enviar o email de recuperação.')
+      }
     } finally {
       setLoading(false)
     }
@@ -51,7 +59,7 @@ export default function ForgotPasswordPage() {
             </div>
             <CardTitle className="text-3xl">Recuperar acesso</CardTitle>
             <CardDescription>
-              Informe o email da conta. Vamos enviar o link para redefinir sua senha.
+              Informe o email da conta criada com email e senha. Contas criadas apenas com Google devem entrar pelo botão do Google.
             </CardDescription>
           </CardHeader>
           <CardContent>
