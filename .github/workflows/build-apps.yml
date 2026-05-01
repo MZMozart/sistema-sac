@@ -51,8 +51,6 @@ jobs:
 
   android-debug:
     runs-on: ubuntu-latest
-    env:
-      JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,10 +70,20 @@ jobs:
       - run: chmod +x android/gradlew
       - name: Verify Android build environment
         run: |
+          if [ -n "$JAVA_HOME_17_X64" ]; then
+            export JAVA_HOME="$JAVA_HOME_17_X64"
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
           java -version
           ./gradlew --version
         working-directory: android
-      - run: ./gradlew assembleDebug --stacktrace --no-daemon
+      - name: Build Android APK
+        run: |
+          if [ -n "$JAVA_HOME_17_X64" ]; then
+            export JAVA_HOME="$JAVA_HOME_17_X64"
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          ./gradlew assembleDebug --stacktrace --no-daemon
         working-directory: android
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/AtendePro-Android-debug.apk
       - uses: actions/upload-artifact@v4
