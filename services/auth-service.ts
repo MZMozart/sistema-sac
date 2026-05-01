@@ -35,15 +35,7 @@ export class AuthService {
   }
 
   static shouldUseGoogleRedirect() {
-    if (typeof window === 'undefined') return false
-
-    const userAgent = window.navigator.userAgent || ''
-    const isAndroidWebView = /Android/i.test(userAgent) && /\bwv\b|Version\/[\d.]+/i.test(userAgent)
-    const isInstalledWebApp =
-      window.matchMedia?.('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true
-
-    return isAndroidWebView || isInstalledWebApp
+    return false
   }
 
   static async ensureDeviceScopedSession() {
@@ -167,19 +159,26 @@ export class AuthService {
   // Google Authentication
   static async signInWithGoogle(accountType?: AccountType): Promise<FirebaseUser> {
     try {
-      if (this.shouldUseGoogleRedirect()) {
-        await this.ensureDeviceScopedSession()
+      await this.ensureDeviceScopedSession()
+      let result
+
+      try {
+        result = await signInWithPopup(auth, googleProvider)
+      } catch (error: any) {
+        if (error?.code !== 'auth/popup-blocked') {
+          throw error
+        }
+
         try {
           window.localStorage.setItem(googleRedirectAccountTypeKey, accountType || 'pf')
         } catch {
           throw Object.assign(new Error('auth/web-storage-unavailable'), { code: 'auth/web-storage-unavailable' })
         }
+
         await signInWithRedirect(auth, googleProvider)
         return await new Promise<FirebaseUser>(() => undefined)
       }
 
-      await this.ensureDeviceScopedSession()
-      const result = await signInWithPopup(auth, googleProvider)
       const firebaseUser = result.user
 
       await this.persistGoogleUser(firebaseUser, accountType)

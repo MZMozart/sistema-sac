@@ -14,16 +14,9 @@ const publicFirebaseEnv = {
 
 export const firebaseEnvReady = Object.values(publicFirebaseEnv).every(Boolean)
 
-const productionAppHost = 'atendepro-tcc.vercel.app'
-const firebaseHostingAuthDomain = publicFirebaseEnv.authDomain || 'missing.firebaseapp.com'
-const shouldUseAppAuthDomain =
-  typeof window !== 'undefined' &&
-  window.location.hostname === productionAppHost &&
-  publicFirebaseEnv.projectId === 'sistema-atendimento-global'
-
 export const firebaseConfig = {
   apiKey: publicFirebaseEnv.apiKey || 'missing-api-key',
-  authDomain: shouldUseAppAuthDomain ? productionAppHost : firebaseHostingAuthDomain,
+  authDomain: publicFirebaseEnv.authDomain || 'missing.firebaseapp.com',
   projectId: publicFirebaseEnv.projectId || 'missing-project-id',
   storageBucket: publicFirebaseEnv.storageBucket || 'missing-project-id.appspot.com',
   messagingSenderId: publicFirebaseEnv.messagingSenderId || '0',
