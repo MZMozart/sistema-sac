@@ -225,7 +225,14 @@ export class AuthService {
   // Password Reset
   static async resetPassword(email: string): Promise<void> {
     try {
-      await sendPasswordResetEmail(auth, email)
+      const actionCodeSettings = typeof window !== 'undefined'
+        ? {
+            url: `${window.location.origin}/auth/login`,
+            handleCodeInApp: false,
+          }
+        : undefined
+
+      await sendPasswordResetEmail(auth, email, actionCodeSettings)
     } catch (error) {
       console.error('Password reset error:', error)
       throw error
