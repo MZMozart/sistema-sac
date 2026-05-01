@@ -110,9 +110,10 @@ jobs:
         if: always() && startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
+          ANDROID_BUILD_STATUS: ${{ steps.android_build.outputs.status }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "AtendePro $GITHUB_REF_NAME" --notes "Instaladores do AtendePro para Windows e Android."
-          if [ -f android-build.log ]; then
+          if [ "$ANDROID_BUILD_STATUS" != "0" ] && [ -f android-build.log ]; then
             gh release upload "$GITHUB_REF_NAME" android-build.log --clobber
           fi
           if [ -f android/app/build/outputs/apk/debug/AtendePro-Android-debug.apk ]; then
