@@ -1,0 +1,47 @@
+name: Build desktop and Android apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run desktop:build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AtendePro-Windows
+          path: dist-desktop/*.exe
+
+  android-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm install
+      - run: npx capacitor add android
+        if: ${{ hashFiles('android/build.gradle') == '' }}
+      - run: npx capacitor sync android
+      - run: chmod +x android/gradlew
+      - run: ./gradlew assembleDebug
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AtendePro-Android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk

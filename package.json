@@ -1,5 +1,5 @@
 {
-  "name": "my-project",
+  "name": "atendepro",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,9 +9,15 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "desktop:dev": "concurrently -k \"yarn dev\" \"wait-on http://localhost:3000 && electron electron/main.cjs\"",
-    "desktop:build": "yarn build && electron-builder",
-    "desktop:start": "electron electron/main.cjs"
+    "desktop:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:3000 && electron electron/main.cjs\"",
+    "desktop:start": "electron electron/main.cjs",
+    "desktop:build": "npm run build && electron-builder",
+    "desktop:build:win": "npm run build && electron-builder --win nsis",
+    "android:add": "capacitor add android",
+    "android:sync": "capacitor sync android",
+    "android:open": "capacitor open android",
+    "android:build:debug": "capacitor sync android && cd android && gradlew assembleDebug",
+    "android:build:release": "capacitor sync android && cd android && gradlew assembleRelease"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -78,6 +84,9 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@tailwindcss/postcss": "^4.2.1",
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
     "@types/node": "^22",
     "@types/qrcode": "^1.5.6",
     "@types/react": "19.2.14",

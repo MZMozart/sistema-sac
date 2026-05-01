@@ -2,7 +2,8 @@ const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
 
 const isDev = !app.isPackaged
-const desktopUrl = process.env.ELECTRON_START_URL || process.env.ELECTRON_APP_URL || 'http://localhost:3000'
+const productionUrl = 'https://atendepro-tcc.vercel.app'
+const desktopUrl = process.env.ELECTRON_START_URL || process.env.ELECTRON_APP_URL || (isDev ? 'http://localhost:3000' : productionUrl)
 const loginUrl = new URL('/auth/login', desktopUrl).toString()
 
 function createWindow() {
