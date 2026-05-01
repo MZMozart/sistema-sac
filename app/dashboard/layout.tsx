@@ -109,7 +109,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div className="min-h-screen bg-background">
         <Header scope="company" profileHref="/dashboard/profile" settingsHref="/dashboard/settings" />
-        <main className="flex min-h-screen items-center justify-center px-4 pt-20">
+        <main className="app-main-offset safe-page-x flex min-h-screen items-center justify-center">
           <div className="max-w-xl rounded-[2rem] border border-border bg-card/80 p-8 text-center shadow-[0_24px_80px_-32px_rgba(2,6,23,0.55)]">
             <h1 className="text-2xl font-bold">Acesso fora do horário de trabalho</h1>
             <p className="mt-3 text-sm text-muted-foreground">Sua empresa definiu um horário específico para o seu acesso. Enviamos uma notificação para a empresa aprovar ou negar sua entrada fora do horário.</p>
@@ -123,7 +123,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen bg-background">
       <Header scope="company" profileHref="/dashboard/profile" settingsHref="/dashboard/settings" />
       <Sidebar userType="company" expanded={sidebarOpen} onOpen={() => setSidebarOpen(true)} onClose={() => setSidebarOpen(false)} role={currentRole} permissions={currentPermissions} />
-      <main className="min-h-screen px-4 pt-20 transition-all duration-300 lg:pl-24 lg:pr-6">{children}</main>
+      <main className="app-main-offset safe-page-x min-h-screen transition-all duration-300 lg:pl-24 lg:pr-6">{children}</main>
     </div>
   )
 }

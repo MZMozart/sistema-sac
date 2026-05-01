@@ -27,7 +27,7 @@ export default function HomePage() {
     <div className="mesh-background min-h-screen overflow-hidden">
       <LandingHeader />
 
-      <main className="mx-auto flex min-h-screen max-w-7xl flex-col justify-center gap-10 px-4 pb-12 pt-24">
+      <main className="landing-main-offset safe-page-x mx-auto flex min-h-screen max-w-7xl flex-col justify-center gap-10">
         <HeroSection />
         <FeatureGrid />
         <ScrollShowcase />

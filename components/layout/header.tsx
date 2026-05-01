@@ -56,8 +56,8 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
   }
 
   return (
-    <header className="fixed inset-x-0 top-0 z-40 h-16 border-b border-border bg-background/92 backdrop-blur-xl">
-      <div className="flex h-full items-center justify-between px-4 lg:px-6">
+    <header className="app-fixed-header fixed inset-x-0 top-0 z-40 border-b border-border bg-background/92 backdrop-blur-xl">
+      <div className="flex min-h-16 items-center justify-between px-4 lg:px-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={toggleSidebar} data-testid={`${scope}-header-sidebar-toggle`}>
             <Menu className="h-5 w-5" />

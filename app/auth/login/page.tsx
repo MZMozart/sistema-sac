@@ -123,8 +123,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 glass-strong border-b border-border">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="app-fixed-header fixed top-0 left-0 right-0 z-50 glass-strong border-b border-border">
+        <div className="container mx-auto flex min-h-16 items-center justify-between px-4">
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Voltar</span>
@@ -135,7 +135,7 @@ export default function LoginPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex items-center justify-center p-4 pt-20">
+      <main className="app-main-offset safe-page-x flex flex-1 items-center justify-center">
         <div className="w-full max-w-md">
           <Card className="border-border bg-card/80 backdrop-blur-sm animate-scale-in">
             <CardHeader className="text-center space-y-2 pb-2">

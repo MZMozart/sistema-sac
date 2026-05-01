@@ -29,7 +29,7 @@ export default function AppLayout({ children, userType }: AppLayoutProps) {
       <div className="min-h-screen bg-muted">
         <Header scope={userType === 'company' ? 'company' : 'client'} profileHref={userType === 'company' ? '/dashboard/profile' : '/cliente/perfil'} settingsHref={userType === 'company' ? '/dashboard/settings' : '/cliente/configuracoes'} />
         <Sidebar userType={userType} expanded={expanded} onOpen={() => setExpanded(true)} onClose={closeSidebar} />
-        <main className="min-h-screen pl-24 pr-4 pt-20">{children}</main>
+        <main className="app-main-offset min-h-screen pl-24 pr-4">{children}</main>
       </div>
     </AuthGuard>
   );
