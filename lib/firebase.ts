@@ -14,9 +14,16 @@ const publicFirebaseEnv = {
 
 export const firebaseEnvReady = Object.values(publicFirebaseEnv).every(Boolean)
 
+function getRuntimeAuthDomain() {
+  if (typeof window === 'undefined') return publicFirebaseEnv.authDomain
+  return window.location.hostname === 'atendepro-tcc.vercel.app'
+    ? window.location.hostname
+    : publicFirebaseEnv.authDomain
+}
+
 export const firebaseConfig = {
   apiKey: publicFirebaseEnv.apiKey || 'missing-api-key',
-  authDomain: publicFirebaseEnv.authDomain || 'missing.firebaseapp.com',
+  authDomain: getRuntimeAuthDomain() || 'missing.firebaseapp.com',
   projectId: publicFirebaseEnv.projectId || 'missing-project-id',
   storageBucket: publicFirebaseEnv.storageBucket || 'missing-project-id.appspot.com',
   messagingSenderId: publicFirebaseEnv.messagingSenderId || '0',

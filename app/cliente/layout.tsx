@@ -36,7 +36,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
       <div className="min-h-screen bg-muted">
         <Header scope="client" profileHref="/cliente/perfil" settingsHref="/cliente/configuracoes" />
         <Sidebar userType="client" expanded={sidebarOpen} onOpen={() => setSidebarOpen(true)} onClose={() => setSidebarOpen(false)} />
-        <main className={isImmersiveRoute ? 'mt-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] overflow-hidden pl-0 lg:pl-24' : 'app-main-offset safe-page-x min-h-screen transition-all duration-300 lg:pl-24 lg:pr-6'}>
+        <main className={isImmersiveRoute ? 'mt-[var(--app-header-height)] h-[calc(100dvh-var(--app-header-height))] overflow-hidden pl-0 lg:pl-24' : 'app-main-offset app-shell-main min-h-screen transition-all duration-300'}>
           {children}
         </main>
       </div>

@@ -43,15 +43,75 @@ export default function AuditoriaPage() {
     loadData()
   }, [company?.id])
 
-  const filteredLogs = useMemo(() => {
+  const protocolCases = useMemo(() => {
+    const rows = new Map<string, any>()
+    const ensureCase = (key: string, base: any = {}) => {
+      if (!rows.has(key)) {
+        rows.set(key, {
+          id: key,
+          protocol: key,
+          chatId: base.chatId || null,
+          callId: base.callId || null,
+          clientName: base.clientName || null,
+          employeeName: base.employeeName || null,
+          summary: base.summary || 'Atendimento registrado no sistema.',
+          latestAt: toDate(base.createdAt),
+          logs: [],
+          messages: [],
+          calls: [],
+        })
+      }
+      return rows.get(key)
+    }
+
+    logs.forEach((log) => {
+      const key = String(log.protocol || log.chatId || log.callId || log.id)
+      const item = ensureCase(key, log)
+      item.logs.push(log)
+      item.chatId = item.chatId || log.chatId || null
+      item.callId = item.callId || log.callId || null
+      item.clientName = item.clientName || log.clientName || null
+      item.employeeName = item.employeeName || log.employeeName || null
+      const date = toDate(log.createdAt)
+      if (date > item.latestAt) {
+        item.latestAt = date
+        item.summary = log.summary || item.summary
+      }
+    })
+
+    calls.forEach((call) => {
+      const key = String(call.protocolo || call.protocol || call.id)
+      const item = ensureCase(key, call)
+      item.calls.push(call)
+      item.callId = item.callId || call.id
+      item.clientName = item.clientName || call.clientName || null
+      item.employeeName = item.employeeName || call.employeeName || null
+      const date = toDate(call.createdAt)
+      if (date > item.latestAt) item.latestAt = date
+    })
+
+    messages.forEach((message) => {
+      const linkedLog = logs.find((log) => log.chatId && log.chatId === message.chatId)
+      const key = String(linkedLog?.protocol || message.chatId || message.id)
+      const item = ensureCase(key, { chatId: message.chatId, createdAt: message.createdAt })
+      item.messages.push(message)
+      item.chatId = item.chatId || message.chatId || null
+      const date = toDate(message.createdAt)
+      if (date > item.latestAt) item.latestAt = date
+    })
+
+    return Array.from(rows.values()).sort((a, b) => b.latestAt.getTime() - a.latestAt.getTime())
+  }, [calls, logs, messages])
+
+  const filteredCases = useMemo(() => {
     const normalized = queryText.trim().toLowerCase()
-    if (!normalized) return logs
-    return logs.filter((item) =>
-      [item.protocol, item.clientName, item.employeeName, item.summary]
+    if (!normalized) return protocolCases
+    return protocolCases.filter((item) =>
+      [item.protocol, item.clientName, item.employeeName, item.summary, item.chatId, item.callId]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalized))
     )
-  }, [logs, queryText])
+  }, [protocolCases, queryText])
 
   return (
     <div className="space-y-6" data-testid="dashboard-auditoria-page">
@@ -68,19 +128,21 @@ export default function AuditoriaPage() {
 
       {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div> : (
         <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <Card className="glass border-border/80">
-            <CardHeader><CardTitle>Timeline do atendimento</CardTitle></CardHeader>
+            <Card className="glass border-border/80">
+            <CardHeader><CardTitle>Atendimentos por protocolo</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {filteredLogs.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum log encontrado.</div> : filteredLogs.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4" data-testid={`audit-log-${item.id}`}>
+              {filteredCases.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum protocolo encontrado.</div> : filteredCases.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4" data-testid={`audit-protocol-card-${item.id}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium">{item.summary}</p>
-                      <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol || item.chatId || item.callId)}`} className="text-xs text-primary hover:underline" data-testid={`audit-protocol-link-${item.id}`}>{item.protocol || item.chatId || item.callId}</Link>
+                      <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol)}`} className="text-xs text-primary hover:underline" data-testid={`audit-protocol-link-${item.id}`}>{item.protocol}</Link>
                     </div>
-                    <Badge variant="outline">{item.eventType}</Badge>
+                    <Badge variant="outline">{item.logs.length + item.messages.length + item.calls.length} eventos</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{toDate(item.createdAt).toLocaleString('pt-BR')}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {item.clientName || 'Cliente'} • {item.employeeName || 'Sem atendente'} • {item.latestAt.toLocaleString('pt-BR')}
+                  </p>
                 </div>
               ))}
             </CardContent>
@@ -88,15 +150,17 @@ export default function AuditoriaPage() {
 
           <div className="space-y-6">
             <Card className="glass border-border/80">
-              <CardHeader><CardTitle>Histórico completo do chat</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Resumo de mensagens por protocolo</CardTitle></CardHeader>
               <CardContent className="space-y-3">
-                {messages.filter((item) => !queryText || String(item.chatId || '').includes(queryText) || String(item.senderName || '').toLowerCase().includes(queryText.toLowerCase())).slice(0, 20).map((item) => (
+                {filteredCases.filter((item) => item.messages.length > 0).slice(0, 20).map((item) => (
                   <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium">{item.senderName || item.senderType}</span>
-                      <span className="text-xs text-muted-foreground">{toDate(item.createdAt).toLocaleString('pt-BR')}</span>
+                      <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol)}`} className="text-sm font-medium text-primary hover:underline">{item.protocol}</Link>
+                      <span className="text-xs text-muted-foreground">{item.messages.length} mensagens</span>
                     </div>
-                    <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{item.content}</p>
+                    <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">
+                      {item.messages[item.messages.length - 1]?.content || item.messages[item.messages.length - 1]?.message || 'Sem conteúdo textual.'}
+                    </p>
                   </div>
                 ))}
               </CardContent>

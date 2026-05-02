@@ -175,6 +175,18 @@ body {
   padding-bottom: max(1rem, var(--safe-area-bottom));
 }
 
+.app-shell-main {
+  padding-left: max(1rem, var(--safe-area-left));
+  padding-right: max(1rem, var(--safe-area-right));
+}
+
+@media (min-width: 1024px) {
+  .app-shell-main {
+    padding-left: calc(6rem + max(1.5rem, var(--safe-area-left)));
+    padding-right: calc(1.5rem + max(0rem, var(--safe-area-right)));
+  }
+}
+
 .landing-fixed-header {
   min-height: var(--landing-header-height);
   padding-top: var(--safe-area-top);

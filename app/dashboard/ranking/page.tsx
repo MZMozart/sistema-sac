@@ -15,28 +15,37 @@ export default function RankingPage() {
 
   useEffect(() => {
     const loadRanking = async () => {
-      if (!company?.segmento) return
+      if (!company?.segmento) {
+        setRanking([])
+        setLoading(false)
+        return
+      }
       setLoading(true)
-      const companiesSnapshot = await getDocs(query(collection(db, 'companies'), where('segmento', '==', company.segmento)))
-      const rows = await Promise.all(companiesSnapshot.docs.map(async (companyItem) => {
-        const companyData = { id: companyItem.id, ...(companyItem.data() as any) }
-        const [chatsSnap, callsSnap, ratingsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'chats'), where('companyId', '==', companyItem.id))),
-          getDocs(query(collection(db, 'calls'), where('companyId', '==', companyItem.id))),
-          getDocs(query(collection(db, 'ratings'), where('companyId', '==', companyItem.id))),
-        ])
-        return {
-          ...companyData,
-          performance: calculateCompanyPerformance({
-            company: companyData,
-            chats: chatsSnap.docs.map((item) => item.data()),
-            calls: callsSnap.docs.map((item) => item.data()),
-            ratings: ratingsSnap.docs.map((item) => item.data()),
-          }),
-        }
-      }))
-      setRanking(buildSectorRanking(rows))
-      setLoading(false)
+      try {
+        const companiesSnapshot = await getDocs(query(collection(db, 'companies'), where('segmento', '==', company.segmento)))
+        const rows = await Promise.all(companiesSnapshot.docs.map(async (companyItem) => {
+          const companyData = { id: companyItem.id, ...(companyItem.data() as any) }
+          const [chatsSnap, callsSnap, ratingsSnap] = await Promise.all([
+            getDocs(query(collection(db, 'chats'), where('companyId', '==', companyItem.id))),
+            getDocs(query(collection(db, 'calls'), where('companyId', '==', companyItem.id))),
+            getDocs(query(collection(db, 'ratings'), where('companyId', '==', companyItem.id))),
+          ])
+          return {
+            ...companyData,
+            performance: calculateCompanyPerformance({
+              company: companyData,
+              chats: chatsSnap.docs.map((item) => item.data()),
+              calls: callsSnap.docs.map((item) => item.data()),
+              ratings: ratingsSnap.docs.map((item) => item.data()),
+            }),
+          }
+        }))
+        setRanking(buildSectorRanking(rows))
+      } catch {
+        setRanking([])
+      } finally {
+        setLoading(false)
+      }
     }
 
     loadRanking()

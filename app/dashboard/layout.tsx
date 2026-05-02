@@ -123,7 +123,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen bg-background">
       <Header scope="company" profileHref="/dashboard/profile" settingsHref="/dashboard/settings" />
       <Sidebar userType="company" expanded={sidebarOpen} onOpen={() => setSidebarOpen(true)} onClose={() => setSidebarOpen(false)} role={currentRole} permissions={currentPermissions} />
-      <main className="app-main-offset safe-page-x min-h-screen transition-all duration-300 lg:pl-24 lg:pr-6">{children}</main>
+      <main className="app-main-offset app-shell-main min-h-screen transition-all duration-300">{children}</main>
     </div>
   )
 }

@@ -90,6 +90,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (!AuthService.getPendingGoogleRedirectType()) return
+
+    let cancelled = false
+    setLoading(true)
+
+    AuthService.completeGoogleRedirectSignIn()
+      .then(async (firebaseUser) => {
+        if (!firebaseUser || cancelled) return
+        setUser(firebaseUser)
+        const data = await fetchUserData(firebaseUser)
+        const userType = getUserType(data, employee)
+
+        if ((data as any)?.twoFactorEnabled) {
+          sessionStorage.setItem('twoFactorPending', '1')
+          sessionStorage.setItem('twoFactorPendingType', userType)
+          window.location.href = '/auth/login'
+          return
+        }
+
+        await finalizeAuthenticatedFlow(firebaseUser, data)
+      })
+      .catch((error) => {
+        console.error('Google redirect sign in error:', error)
+        AuthService.clearPendingGoogleRedirectType()
+        window.location.href = '/auth/login?googleAuthError=storage'
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const isProfileIncomplete = (data: User | null) => {
     if (!data) return false
     if (data.accountType === 'pf') {
@@ -120,19 +156,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const redirectForType = (type: string) => {
     switch (type) {
       case 'cliente':
-        window.location.href = '/cliente'
+        window.location.href = '/cliente/dashboard'
         break
       case 'empresa_owner':
         window.location.href = '/dashboard'
         break
       case 'empresa_gerente':
-        window.location.href = '/dashboard/manager'
+        window.location.href = '/dashboard'
         break
       case 'empresa_atendente':
-        window.location.href = '/dashboard/attendant'
+        window.location.href = '/dashboard'
         break
       default:
-        window.location.href = '/cliente'
+        window.location.href = '/cliente/dashboard'
     }
   }
 
@@ -182,11 +218,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (firebaseUser) {
         userDataObj = await fetchUserData(firebaseUser);
       }
-      // Redirect based on user type
       if (type === 'pj') {
         window.location.href = '/dashboard/setup'
       } else {
-        window.location.href = '/cliente'
+        window.location.href = '/cliente/dashboard'
       }
     } catch (error: any) {
       console.error('Sign up error:', error)

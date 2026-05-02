@@ -2,8 +2,10 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -25,6 +27,8 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firest
 import { auth, db, googleProvider, appleProvider } from '@/lib/firebase'
 import type { User, AccountType, Company } from '@/lib/types'
 
+const googleRedirectAccountTypeKey = 'atendepro.googleRedirect.accountType'
+
 export class AuthService {
   static async ensureTabScopedSession() {
     await setPersistence(auth, browserSessionPersistence)
@@ -32,6 +36,30 @@ export class AuthService {
 
   static async ensureDeviceScopedSession() {
     await setPersistence(auth, browserLocalPersistence)
+  }
+
+  static isEmbeddedApp() {
+    if (typeof window === 'undefined') return false
+    const runtime = window as any
+    return Boolean(runtime.desktopShell?.isDesktop || runtime.Capacitor?.isNativePlatform?.())
+  }
+
+  static getPendingGoogleRedirectType(): AccountType | null {
+    if (typeof window === 'undefined') return null
+    try {
+      return window.localStorage.getItem(googleRedirectAccountTypeKey) as AccountType | null
+    } catch {
+      return null
+    }
+  }
+
+  static clearPendingGoogleRedirectType() {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.removeItem(googleRedirectAccountTypeKey)
+    } catch {
+      // Local storage can be unavailable in restricted embedded browsers.
+    }
   }
 
   private static async persistGoogleUser(firebaseUser: FirebaseUser, accountType?: AccountType) {
@@ -56,6 +84,23 @@ export class AuthService {
         createdAt: serverTimestamp(),
       })
     }
+  }
+
+  static async completeGoogleRedirectSignIn(): Promise<FirebaseUser | null> {
+    const pendingAccountType = this.getPendingGoogleRedirectType()
+    if (!pendingAccountType) return null
+
+    await this.ensureDeviceScopedSession()
+    const result = await getRedirectResult(auth)
+
+    if (!result?.user) {
+      this.clearPendingGoogleRedirectType()
+      return null
+    }
+
+    await this.persistGoogleUser(result.user, pendingAccountType)
+    this.clearPendingGoogleRedirectType()
+    return result.user
   }
 
   // Email and Password Authentication
@@ -117,6 +162,13 @@ export class AuthService {
   static async signInWithGoogle(accountType?: AccountType): Promise<FirebaseUser> {
     try {
       await this.ensureDeviceScopedSession()
+
+      if (this.isEmbeddedApp()) {
+        window.localStorage.setItem(googleRedirectAccountTypeKey, accountType || 'pf')
+        await signInWithRedirect(auth, googleProvider)
+        return await new Promise<FirebaseUser>(() => undefined)
+      }
+
       const result = await signInWithPopup(auth, googleProvider)
       const firebaseUser = result.user
 

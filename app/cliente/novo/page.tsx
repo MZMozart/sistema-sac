@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2 } from 'lucide-react'
+import { Building2, Loader2, MapPin, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
 const categories = ['Problema técnico', 'Cobrança', 'Dúvida', 'Comercial', 'Outro']
@@ -29,6 +29,7 @@ export default function NewTicketPage() {
   const router = useRouter()
   const { user, userData } = useAuth()
   const [companies, setCompanies] = useState<any[]>([])
+  const [companySearch, setCompanySearch] = useState('')
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -59,6 +60,13 @@ export default function NewTicketPage() {
   }, [])
 
   const selectedCompany = useMemo(() => companies.find((item) => item.id === form.companyId), [companies, form.companyId])
+  const filteredCompanies = useMemo(() => {
+    const text = companySearch.trim().toLowerCase()
+    if (!text) return companies
+    return companies.filter((company) =>
+      `${company.nomeFantasia || ''} ${company.razaoSocial || ''} ${company.segmento || ''} ${company.city || ''} ${company.state || ''}`.toLowerCase().includes(text)
+    )
+  }, [companies, companySearch])
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -162,10 +170,60 @@ export default function NewTicketPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl" data-testid="client-new-ticket-page">
+    <div className="mx-auto max-w-6xl space-y-6" data-testid="client-new-ticket-page">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Novo atendimento</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Escolha uma empresa da vitrine e abra um protocolo de atendimento.</p>
+        </div>
+        <div className="relative w-full lg:max-w-md">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={companySearch}
+            onChange={(event) => setCompanySearch(event.target.value)}
+            placeholder="Pesquisar empresa por nome, setor ou cidade"
+            className="h-12 pl-11"
+            data-testid="client-new-ticket-company-search-input"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filteredCompanies.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
+            Nenhuma empresa pública encontrada.
+          </div>
+        ) : filteredCompanies.map((company) => {
+          const active = company.id === form.companyId
+          return (
+            <button
+              key={company.id}
+              type="button"
+              onClick={() => setForm((current) => ({ ...current, companyId: company.id }))}
+              className={`rounded-3xl border bg-card/70 p-5 text-left transition hover:border-primary/70 ${active ? 'border-primary shadow-[0_20px_60px_-35px_rgba(37,99,235,0.9)]' : 'border-border'}`}
+              data-testid={`client-new-ticket-company-card-${company.id}`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Building2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{company.nomeFantasia || company.razaoSocial || 'Empresa'}</p>
+                  <p className="mt-1 truncate text-sm text-muted-foreground">{company.segmento || 'Atendimento geral'}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5" />
+                <span className="truncate">{[company.city, company.state].filter(Boolean).join(' - ') || company.address || 'Atendimento online'}</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
       <Card className="glass border-border/80">
         <CardHeader>
-          <CardTitle>Abrir novo atendimento</CardTitle>
+          <CardTitle>{selectedCompany ? `Abrir atendimento com ${selectedCompany.nomeFantasia || selectedCompany.razaoSocial}` : 'Escolha uma empresa para continuar'}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2">
