@@ -63,3 +63,5 @@ tsconfig.tsbuildinfo
 # Local deployment state
 
 .vercel
+.env.vercel.check
+.tmp-firebase-*
