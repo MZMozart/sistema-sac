@@ -9,8 +9,20 @@ function normalizePrivateKey(value?: string) {
   return value?.replace(/\\n/g, '\n')
 }
 
+function normalizeCredentialEnv(value: string) {
+  const trimmed = value.trim()
+  const first = trimmed[0]
+  const last = trimmed[trimmed.length - 1]
+
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return trimmed.slice(1, -1)
+  }
+
+  return trimmed
+}
+
 function parseServiceAccount(raw: string): ServiceAccount {
-  const parsed = JSON.parse(raw)
+  const parsed = JSON.parse(normalizeCredentialEnv(raw))
   return {
     projectId: parsed.project_id,
     clientEmail: parsed.client_email,
@@ -20,9 +32,14 @@ function parseServiceAccount(raw: string): ServiceAccount {
 
 function getServiceAccount(): ServiceAccount | null {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim()
+    const raw = normalizeCredentialEnv(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
     const decoded = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')
-    return parseServiceAccount(decoded)
+    try {
+      return parseServiceAccount(decoded)
+    } catch (error) {
+      console.error('Não foi possível carregar a credencial Firebase Admin da variável FIREBASE_SERVICE_ACCOUNT_JSON.')
+      return null
+    }
   }
 
   if (

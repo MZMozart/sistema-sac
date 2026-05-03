@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (error: any) {
+    console.error('Falha ao validar login 2FA:', error?.message || error)
     const status = error?.message === 'missing-auth-token' ? 401 : 500
     return NextResponse.json({ error: error?.message || 'twofactor-verify-login-failed' }, { status })
   }

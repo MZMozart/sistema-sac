@@ -120,7 +120,13 @@ export default function LoginPage() {
       await verifyTwoFactorLogin(twoFactorCode)
       toast.success('2FA validado com sucesso!')
     } catch (error: any) {
-      toast.error('Código 2FA inválido ou expirado.')
+      if (error?.status >= 500) {
+        toast.error('Falha no servidor do 2FA. Verifique a credencial Firebase Admin da Vercel.')
+      } else if (error?.message === 'missing-auth-token') {
+        toast.error('Sua sessão expirou. Faça login novamente.')
+      } else {
+        toast.error('Código 2FA inválido ou expirado.')
+      }
     } finally {
       setLoading(false)
     }

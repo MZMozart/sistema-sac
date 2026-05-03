@@ -370,7 +370,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     const result = await response.json()
-    if (!response.ok) throw new Error(result.error || 'twofactor-verification-failed')
+    if (!response.ok) {
+      const error = new Error(result.error || 'twofactor-verification-failed') as Error & { status?: number }
+      error.status = response.status
+      throw error
+    }
 
     const data = await fetchUserData(firebaseUser)
     await finalizeAuthenticatedFlow(firebaseUser, data)
