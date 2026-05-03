@@ -35,6 +35,7 @@ function cleanSummary(log: any) {
   if (eventType === 'call_message') return `${log.clientName || log.employeeName || 'Participante'} enviou mensagem no chat da ligação.`
   if (eventType === 'call_menu_selected') return `Cliente escolheu a opção ${metadata.digit || log.selectedOptionDigit || ''}${metadata.label ? ` (${metadata.label})` : ''}.`
   if (eventType === 'call_recording_saved') return 'Gravação da ligação salva.'
+  if (eventType === 'call_recording_failed') return 'Falha ao salvar a gravação da ligação.'
   if (eventType === 'call_recording_unavailable') return 'Gravação não ficou disponível nesse navegador.'
   if (eventType === 'call_ended') return `${base} Duração: ${formatSeconds(metadata.duration)}. Microfone silenciado por ${formatSeconds(metadata.muteDuration)}.`
   return base

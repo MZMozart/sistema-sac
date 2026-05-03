@@ -50,6 +50,29 @@ function normalizeExternalUrl(url?: string | null) {
   return `https://${url}`
 }
 
+function buildCallBotSpeech(company: Company) {
+  const greeting = company.settings?.callBotGreeting || company.botGreeting || `Olá, você ligou para ${company.nomeFantasia || company.razaoSocial}.`
+  const options = company.settings?.callBotOptions || company.uraOptions || []
+  const optionsText = Array.isArray(options)
+    ? options
+        .filter((option: any) => option?.digit || option?.label)
+        .map((option: any) => `Digite ${option?.digit || ''} para ${option?.speech || option?.description || option?.label || 'continuar'}.`)
+        .join(' ')
+    : ''
+
+  return [greeting, optionsText].filter(Boolean).join(' ')
+}
+
+function speakCallBotNow(text: string) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text.trim()) return
+  window.speechSynthesis.cancel()
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 900))
+  utterance.lang = 'pt-BR'
+  utterance.rate = 1
+  utterance.volume = 1
+  window.speechSynthesis.speak(utterance)
+}
+
 export default function EmpresaPage({ params }: { params: { id: string } }) {
   const { id } = params
   const router = useRouter()
@@ -254,6 +277,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
           return
         }
       }
+
+      speakCallBotNow(buildCallBotSpeech(company))
 
       const callRef = doc(collection(db, 'call_sessions'))
       const callId = callRef.id

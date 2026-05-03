@@ -658,37 +658,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const endCall = async () => {
     const roomRef = doc(db, 'call_sessions', roomId)
     const callRef = doc(db, 'calls', callId)
-    const totalDuration = startedAtRef.current ? Math.max(1, Math.floor((Date.now() - startedAtRef.current) / 1000)) : duration
+    const endedAt = Date.now()
+    const totalDuration = startedAtRef.current ? Math.max(1, Math.floor((endedAt - startedAtRef.current) / 1000)) : duration
+
     if (localMuteStartedAtRef.current) {
-      mutedDurationRef.current += Math.round((Date.now() - localMuteStartedAtRef.current) / 1000)
+      mutedDurationRef.current += Math.round((endedAt - localMuteStartedAtRef.current) / 1000)
       localMuteStartedAtRef.current = null
     }
 
-    const recordingUrl = await stopRecorderAndUpload()
+    setStatus('ended')
 
-    const callMessagesSnapshot = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callId)))
-    const callMessages = callMessagesSnapshot.docs.map((item) => item.data() as any)
-    const callFiles = callMessages.filter((item) => item.fileUrl).length
-
-    await updateDoc(roomRef, {
-      status: 'ended',
-      endedBy: currentUserId,
-      endedByRole: mode === 'agent' ? 'employee' : 'client',
-      [`${mode === 'caller' ? 'client' : 'employee'}DisconnectedAt`]: serverTimestamp(),
-      [`${mode === 'caller' ? 'client' : 'employee'}EndedBeforeEmployeeClose`]: mode === 'caller',
-      muteDuration: mutedDurationRef.current,
-      recordingRequired: true,
-      recordingStatus: recordingUrl ? 'saved' : 'not_saved',
-      recordingUrl: recordingUrl || null,
-      endedAt: serverTimestamp(),
-      duration: totalDuration,
-    })
-
-    await setDoc(callRef, {
-      companyId,
-      companyName,
-      employeeId: mode === 'agent' ? currentUserId : agentUserId || null,
-      [`${mode}Name`]: currentUserName,
+    const baseEndPayload = {
       status: 'completed',
       duration: totalDuration,
       muteDuration: mutedDurationRef.current,
@@ -697,15 +677,68 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       endedByRole: mode === 'agent' ? 'employee' : 'client',
       micActiveDuration: Math.max(0, totalDuration - mutedDurationRef.current),
       connectionDrops: connectionDropsRef.current,
-      recordingUrl: recordingUrl || null,
       recordingRequired: true,
-      recordingStatus: recordingUrl ? 'saved' : 'not_saved',
-      callChatMessageCount: callMessages.length,
-      callChatAttachmentCount: callFiles,
+      recordingStatus: 'saving',
       endedByName: currentUserName,
       updatedAt: serverTimestamp(),
       endedAt: serverTimestamp(),
-    }, { merge: true })
+    }
+
+    await Promise.all([
+      setDoc(roomRef, {
+        ...baseEndPayload,
+        status: 'ended',
+        endedBy: currentUserId,
+      }, { merge: true }).catch(() => null),
+      setDoc(callRef, {
+        ...baseEndPayload,
+        companyId,
+        companyName,
+        employeeId: mode === 'agent' ? currentUserId : agentUserId || null,
+        [`${mode}Name`]: currentUserName,
+      }, { merge: true }).catch(() => null),
+    ])
+
+    peerConnectionRef.current?.close()
+
+    const recordingUrl = await stopRecorderAndUpload().catch(async (error) => {
+      await createAuditLog({
+        companyId,
+        companyName,
+        clientId: clientUserId || currentUserId,
+        clientName: mode === 'caller' ? currentUserName : null,
+        employeeId: mode === 'agent' ? currentUserId : agentUserId || null,
+        employeeName: mode === 'agent' ? currentUserName : null,
+        protocol: auditProtocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_failed',
+        summary: 'Não foi possível salvar a gravação da ligação.',
+        metadata: { error: String(error?.message || error || 'erro desconhecido').slice(0, 500) },
+      }).catch(() => null)
+      return null
+    })
+
+    const callMessagesSnapshot = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callId))).catch(() => null)
+    const callMessages = callMessagesSnapshot?.docs.map((item) => item.data() as any) || []
+    const callFiles = callMessages.filter((item) => item.fileUrl).length
+
+    await Promise.all([
+      setDoc(roomRef, {
+        recordingStatus: recordingUrl ? 'saved' : 'not_saved',
+        recordingUrl: recordingUrl || null,
+        callChatMessageCount: callMessages.length,
+        callChatAttachmentCount: callFiles,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null),
+      setDoc(callRef, {
+        recordingUrl: recordingUrl || null,
+        recordingStatus: recordingUrl ? 'saved' : 'not_saved',
+        callChatMessageCount: callMessages.length,
+        callChatAttachmentCount: callFiles,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null),
+    ])
 
     await createAuditLog({
       companyId,
@@ -728,7 +761,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         callChatAttachmentCount: callFiles,
         recordingUrl,
       },
-    })
+    }).catch(() => null)
 
     await createNotification({
       recipientCompanyId: companyId,
@@ -740,13 +773,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       entityId: callId,
       entityType: 'call',
       actorName: currentUserName,
-    })
+    }).catch(() => null)
 
-    peerConnectionRef.current?.close()
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
     audioContextRef.current?.close().catch(() => null)
-    setStatus('ended')
   }
 
   const renderDesktopLayout = () => (

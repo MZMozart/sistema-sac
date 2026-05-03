@@ -143,6 +143,11 @@ export default function ClientCallPage() {
     const cleanText = text.trim()
     if (!cleanText || speakingRef.current) return
     speakingRef.current = true
+    if (process.env.NEXT_PUBLIC_ENABLE_OPENAI_TTS !== 'true') {
+      fallbackSpeakText(cleanText)
+      speakingRef.current = false
+      return
+    }
     try {
       // A voz da URA usa o texto configurado nos botões para o cliente ouvir durante a ligação.
       const response = await fetch('/api/voice/tts', {
