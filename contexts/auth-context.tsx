@@ -29,6 +29,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+const isTwoFactorTemporarilyDisabled = process.env.NEXT_PUBLIC_DISABLE_TWO_FACTOR === 'true'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null)
@@ -119,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await fetchUserData(firebaseUser)
         const userType = getUserType(data, employee)
 
-        if ((data as any)?.twoFactorEnabled) {
+        if (!isTwoFactorTemporarilyDisabled && (data as any)?.twoFactorEnabled) {
           sessionStorage.setItem('twoFactorPending', '1')
           sessionStorage.setItem('twoFactorPendingType', userType)
           window.location.href = '/auth/login'
@@ -209,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await fetchUserData(firebaseUser)
       const type = getUserType(data, employee)
 
-      if ((data as any)?.twoFactorEnabled) {
+      if (!isTwoFactorTemporarilyDisabled && (data as any)?.twoFactorEnabled) {
         sessionStorage.setItem('twoFactorPending', '1')
         sessionStorage.setItem('twoFactorPendingType', type)
         return { requiresTwoFactor: true }
@@ -253,7 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const firebaseUser = await AuthService.signInWithGoogle(type)
       const data = await fetchUserData(firebaseUser)
       const userType = getUserType(data, employee)
-      if ((data as any)?.twoFactorEnabled) {
+      if (!isTwoFactorTemporarilyDisabled && (data as any)?.twoFactorEnabled) {
         sessionStorage.setItem('twoFactorPending', '1')
         sessionStorage.setItem('twoFactorPendingType', userType)
         return { requiresTwoFactor: true }
