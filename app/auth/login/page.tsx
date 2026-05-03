@@ -120,7 +120,9 @@ export default function LoginPage() {
       await verifyTwoFactorLogin(twoFactorCode)
       toast.success('2FA validado com sucesso!')
     } catch (error: any) {
-      if (error?.status >= 500) {
+      if (error?.message === 'firebase-quota-exceeded') {
+        toast.error('Quota do Firebase/Firestore excedida. Aguarde o reset da quota ou ajuste o plano do projeto.')
+      } else if (error?.status >= 500) {
         toast.error('Falha no servidor do 2FA. Verifique a credencial Firebase Admin da Vercel.')
       } else if (error?.message === 'missing-auth-token') {
         toast.error('Sua sessão expirou. Faça login novamente.')
