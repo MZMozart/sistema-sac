@@ -402,48 +402,46 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
 
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                 {isOwnCompany ? (
-                  <Button asChild size="lg" className="w-full sm:w-auto h-12 px-8 hover:opacity-90 glow btn-press" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}>
+                  <Button asChild className="h-10 w-full px-4 text-sm hover:opacity-90 glow btn-press sm:h-12 sm:w-auto sm:px-8 sm:text-base" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}>
                     <Link href="/dashboard/settings">Editar perfil</Link>
                   </Button>
                 ) : null}
                 {canStartAttendance ? (
                   <>
                     <Button
-                      size="lg"
                       onClick={handleStartChat}
                       disabled={startingChat}
-                      className="w-full sm:w-auto h-12 px-8 hover:opacity-90 glow btn-press"
+                      className="h-10 w-full px-4 text-sm hover:opacity-90 glow btn-press sm:h-12 sm:w-auto sm:px-8 sm:text-base"
                       style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
                       data-testid="public-company-start-chat-button"
                     >
                       {startingChat ? (
                         <>
-                          <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin sm:h-5 sm:w-5" />
                           Iniciando...
                         </>
                       ) : (
                         <>
-                          <MessageCircle className="mr-2 w-5 h-5" />
+                          <MessageCircle className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                           Iniciar Conversa
                         </>
                       )}
                     </Button>
                     <Button
-                      size="lg"
                       variant="outline"
                       onClick={handleStartCall}
                       disabled={startingCall}
-                      className="w-full sm:w-auto h-12 px-8"
+                      className="h-10 w-full px-4 text-sm sm:h-12 sm:w-auto sm:px-8 sm:text-base"
                       data-testid="public-company-start-call-button"
                     >
                       {startingCall ? (
                         <>
-                          <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin sm:h-5 sm:w-5" />
                           Conectando...
                         </>
                       ) : (
                         <>
-                          <Phone className="mr-2 w-5 h-5" />
+                          <Phone className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
                           Iniciar Ligação
                         </>
                       )}

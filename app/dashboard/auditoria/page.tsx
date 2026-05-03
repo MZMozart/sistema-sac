@@ -8,7 +8,10 @@ import { useAuth } from '@/contexts/auth-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Loader2, PlayCircle } from 'lucide-react'
+
+const PAGE_SIZE = 10
 
 function toDate(value: any) {
   if (!value) return new Date(0)
@@ -19,6 +22,8 @@ function toDate(value: any) {
 export default function AuditoriaPage() {
   const { company } = useAuth()
   const [queryText, setQueryText] = useState('')
+  const [chatPage, setChatPage] = useState(1)
+  const [callPage, setCallPage] = useState(1)
   const [logs, setLogs] = useState<any[]>([])
   const [messages, setMessages] = useState<any[]>([])
   const [calls, setCalls] = useState<any[]>([])
@@ -42,6 +47,11 @@ export default function AuditoriaPage() {
 
     loadData()
   }, [company?.id])
+
+  useEffect(() => {
+    setChatPage(1)
+    setCallPage(1)
+  }, [queryText])
 
   const protocolCases = useMemo(() => {
     const rows = new Map<string, any>()
@@ -113,6 +123,39 @@ export default function AuditoriaPage() {
     )
   }, [protocolCases, queryText])
 
+  const chatCases = useMemo(() => {
+    return filteredCases.filter((item) => item.chatId || item.messages.length > 0 || item.logs.some((log: any) => log.channel === 'chat'))
+  }, [filteredCases])
+
+  const callCases = useMemo(() => {
+    return filteredCases.filter((item) => item.callId || item.calls.length > 0 || item.logs.some((log: any) => log.channel === 'call'))
+  }, [filteredCases])
+
+  const chatTotalPages = Math.max(1, Math.ceil(chatCases.length / PAGE_SIZE))
+  const callTotalPages = Math.max(1, Math.ceil(callCases.length / PAGE_SIZE))
+  const currentChatPage = Math.min(chatPage, chatTotalPages)
+  const currentCallPage = Math.min(callPage, callTotalPages)
+  const pagedChatCases = chatCases.slice((currentChatPage - 1) * PAGE_SIZE, currentChatPage * PAGE_SIZE)
+  const pagedCallCases = callCases.slice((currentCallPage - 1) * PAGE_SIZE, currentCallPage * PAGE_SIZE)
+
+  const renderPagination = (page: number, totalPages: number, onPageChange: (page: number) => void) => {
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))}>
+          Anterior
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Pagina {page} de {totalPages}
+        </span>
+        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(Math.min(totalPages, page + 1))}>
+          Proxima
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6" data-testid="dashboard-auditoria-page">
       <div>
@@ -128,50 +171,53 @@ export default function AuditoriaPage() {
 
       {loading ? <div className="flex items-center justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div> : (
         <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-            <Card className="glass border-border/80">
-            <CardHeader><CardTitle>Atendimentos por protocolo</CardTitle></CardHeader>
+          <Card className="glass border-border/80">
+            <CardHeader><CardTitle>Chats por protocolo</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {filteredCases.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum protocolo encontrado.</div> : filteredCases.map((item) => (
+              {chatCases.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum chat encontrado.</div> : pagedChatCases.map((item) => (
                 <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4" data-testid={`audit-protocol-card-${item.id}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium">{item.summary}</p>
                       <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol)}`} className="text-xs text-primary hover:underline" data-testid={`audit-protocol-link-${item.id}`}>{item.protocol}</Link>
                     </div>
-                    <Badge variant="outline">{item.logs.length + item.messages.length + item.calls.length} eventos</Badge>
+                    <Badge variant="outline">{item.logs.length + item.messages.length} eventos</Badge>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {item.clientName || 'Cliente'} • {item.employeeName || 'Sem atendente'} • {item.latestAt.toLocaleString('pt-BR')}
                   </p>
                 </div>
               ))}
+              {renderPagination(currentChatPage, chatTotalPages, setChatPage)}
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            <Card className="glass border-border/80">
-              <CardHeader><CardTitle>Reprodução da ligação</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {calls.filter((item) => !queryText || String(item.protocolo || '').toLowerCase().includes(queryText.toLowerCase()) || String(item.clientName || '').toLowerCase().includes(queryText.toLowerCase()) || String(item.employeeName || '').toLowerCase().includes(queryText.toLowerCase())).slice(0, 10).map((call) => (
-                  <div key={call.id} className="rounded-2xl border border-border bg-card/60 p-4">
+          <Card className="glass border-border/80">
+            <CardHeader><CardTitle>Ligações por protocolo</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {callCases.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhuma ligação encontrada.</div> : pagedCallCases.map((item) => {
+                const call = item.calls[0] || {}
+                return (
+                  <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <Link href={`/dashboard/auditoria/${encodeURIComponent(call.protocolo || call.id)}`} className="font-medium text-primary hover:underline" data-testid={`audit-call-link-${call.id}`}>{call.protocolo || call.id}</Link>
-                        <p className="text-xs text-muted-foreground">{call.clientName || 'Cliente'} • {call.employeeName || 'Sem atendente'}</p>
+                        <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol)}`} className="font-medium text-primary hover:underline" data-testid={`audit-call-link-${item.id}`}>{item.protocol}</Link>
+                        <p className="text-xs text-muted-foreground">{item.clientName || call.clientName || 'Cliente'} • {item.employeeName || call.employeeName || 'Sem atendente'}</p>
                       </div>
-                      <Badge variant="outline">{call.status || 'completed'}</Badge>
+                      <Badge variant="outline">{call.status || 'registrada'}</Badge>
                     </div>
                     {call.recordingUrl ? (
                       <div className="mt-3 space-y-2">
                         <div className="flex items-center gap-2 text-sm"><PlayCircle className="h-4 w-4 text-primary" /> Reprodução da gravação</div>
-                        <audio controls className="w-full" src={call.recordingUrl} data-testid={`call-recording-${call.id}`} />
+                        <audio controls className="w-full" src={call.recordingUrl} data-testid={`call-recording-${item.id}`} />
                       </div>
                     ) : <p className="mt-3 text-sm text-muted-foreground">Sem gravação disponível.</p>}
                   </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
+                )
+              })}
+              {renderPagination(currentCallPage, callTotalPages, setCallPage)}
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

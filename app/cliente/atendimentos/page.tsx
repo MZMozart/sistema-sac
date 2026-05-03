@@ -6,9 +6,12 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/contexts/auth-context'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Loader2, MessageSquare, Phone, Search } from 'lucide-react'
+
+const PAGE_SIZE = 10
 
 function toDate(value: any) {
   if (!value) return new Date(0)
@@ -22,6 +25,8 @@ export default function ClientAttendancesPage() {
   const [calls, setCalls] = useState<any[]>([])
   const [loaded, setLoaded] = useState({ chats: false, calls: false })
   const [search, setSearch] = useState('')
+  const [chatPage, setChatPage] = useState(1)
+  const [callPage, setCallPage] = useState(1)
 
   useEffect(() => {
     if (!user?.uid) return
@@ -51,6 +56,11 @@ export default function ClientAttendancesPage() {
       unsubCalls()
     }
   }, [user?.uid])
+
+  useEffect(() => {
+    setChatPage(1)
+    setCallPage(1)
+  }, [search])
 
   const attendances = useMemo(() => {
     return [
@@ -83,6 +93,53 @@ export default function ClientAttendancesPage() {
     return attendances.filter((item) => `${item.protocol} ${item.companyName} ${item.status} ${item.subtitle}`.toLowerCase().includes(text))
   }, [attendances, search])
 
+  const chatAttendances = filteredAttendances.filter((item) => item.kind === 'chat')
+  const callAttendances = filteredAttendances.filter((item) => item.kind === 'call')
+  const chatTotalPages = Math.max(1, Math.ceil(chatAttendances.length / PAGE_SIZE))
+  const callTotalPages = Math.max(1, Math.ceil(callAttendances.length / PAGE_SIZE))
+  const currentChatPage = Math.min(chatPage, chatTotalPages)
+  const currentCallPage = Math.min(callPage, callTotalPages)
+  const pagedChatAttendances = chatAttendances.slice((currentChatPage - 1) * PAGE_SIZE, currentChatPage * PAGE_SIZE)
+  const pagedCallAttendances = callAttendances.slice((currentCallPage - 1) * PAGE_SIZE, currentCallPage * PAGE_SIZE)
+
+  const renderAttendanceCard = (item: (typeof attendances)[number]) => (
+    <Link key={item.id} href={item.href} data-testid={`client-attendance-${item.id}`}>
+      <div className="flex items-center justify-between gap-4 rounded-3xl border border-border bg-card/60 p-4 transition hover:border-primary/60">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {item.kind === 'chat' ? <MessageSquare className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate font-semibold">Protocolo {item.protocol}</p>
+            <p className="truncate text-sm text-muted-foreground">{item.companyName} • {item.subtitle}</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Badge variant="outline">{item.status}</Badge>
+          <span className="hidden text-xs text-muted-foreground sm:inline">{item.date.toLocaleDateString('pt-BR')}</span>
+        </div>
+      </div>
+    </Link>
+  )
+
+  const renderPagination = (page: number, totalPages: number, onPageChange: (page: number) => void) => {
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))}>
+          Anterior
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Pagina {page} de {totalPages}
+        </span>
+        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(Math.min(totalPages, page + 1))}>
+          Proxima
+        </Button>
+      </div>
+    )
+  }
+
   if (!loaded.chats || !loaded.calls) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -111,32 +168,29 @@ export default function ClientAttendancesPage() {
 
       <Card className="glass border-border/80">
         <CardHeader>
-          <CardTitle>Histórico por protocolo</CardTitle>
+          <CardTitle>Chats por protocolo</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {filteredAttendances.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum atendimento registrado.</div>
+          {chatAttendances.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum chat registrado.</div>
           ) : (
-            filteredAttendances.map((item) => (
-              <Link key={item.id} href={item.href} data-testid={`client-attendance-${item.id}`}>
-                <div className="flex items-center justify-between gap-4 rounded-3xl border border-border bg-card/60 p-4 transition hover:border-primary/60">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                      {item.kind === 'chat' ? <MessageSquare className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold">Protocolo {item.protocol}</p>
-                      <p className="truncate text-sm text-muted-foreground">{item.companyName} • {item.subtitle}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <Badge variant="outline">{item.status}</Badge>
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{item.date.toLocaleDateString('pt-BR')}</span>
-                  </div>
-                </div>
-              </Link>
-            ))
+            pagedChatAttendances.map(renderAttendanceCard)
           )}
+          {renderPagination(currentChatPage, chatTotalPages, setChatPage)}
+        </CardContent>
+      </Card>
+
+      <Card className="glass border-border/80">
+        <CardHeader>
+          <CardTitle>Ligações por protocolo</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {callAttendances.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhuma ligação registrada.</div>
+          ) : (
+            pagedCallAttendances.map(renderAttendanceCard)
+          )}
+          {renderPagination(currentCallPage, callTotalPages, setCallPage)}
         </CardContent>
       </Card>
     </div>
