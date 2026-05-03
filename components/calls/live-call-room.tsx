@@ -9,7 +9,7 @@ import { createAuditLog } from '@/lib/audit'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Grid3X3, Loader2, Mic, MicOff, Phone, PhoneOff, Volume2 } from 'lucide-react'
+import { Grid3X3, Loader2, MessageSquare, Mic, MicOff, Phone, PhoneOff, Volume2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 type CallMode = 'caller' | 'agent'
@@ -38,13 +38,14 @@ interface LiveCallRoomProps {
   showMobileKeypad?: boolean
   onToggleMobileKeypad?: () => void
   onSelectCallMenuOption?: (option: any) => void
+  onOpenMobileChat?: () => void
 }
 
 const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
 }
 
-export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption }: LiveCallRoomProps) {
+export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption, onOpenMobileChat }: LiveCallRoomProps) {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -77,16 +78,47 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   }
 
   const startRecording = () => {
-    if (!destinationRef.current || mediaRecorderRef.current || typeof MediaRecorder === 'undefined') return
-    const recorder = MediaRecorder.isTypeSupported('audio/webm')
-      ? new MediaRecorder(destinationRef.current.stream, { mimeType: 'audio/webm' })
-      : new MediaRecorder(destinationRef.current.stream)
-    recordedChunksRef.current = []
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) recordedChunksRef.current.push(event.data)
+    if (!destinationRef.current || mediaRecorderRef.current) return
+    if (typeof MediaRecorder === 'undefined') {
+      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'unsupported', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+      createAuditLog({
+        companyId,
+        companyName,
+        clientId: clientUserId || null,
+        employeeId: mode === 'agent' ? currentUserId : agentUserId || null,
+        protocol: auditProtocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_unavailable',
+        summary: 'O navegador não ofereceu suporte para gravação automática da ligação.',
+      }).catch(() => null)
+      return
     }
-    recorder.start(1000)
-    mediaRecorderRef.current = recorder
+    try {
+      const recorder = MediaRecorder.isTypeSupported('audio/webm')
+        ? new MediaRecorder(destinationRef.current.stream, { mimeType: 'audio/webm' })
+        : new MediaRecorder(destinationRef.current.stream)
+      recordedChunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordedChunksRef.current.push(event.data)
+      }
+      recorder.start(1000)
+      mediaRecorderRef.current = recorder
+      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'recording', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+    } catch {
+      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'failed_to_start', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+      createAuditLog({
+        companyId,
+        companyName,
+        clientId: clientUserId || null,
+        employeeId: mode === 'agent' ? currentUserId : agentUserId || null,
+        protocol: auditProtocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_unavailable',
+        summary: 'Não foi possível iniciar a gravação automática da ligação.',
+      }).catch(() => null)
+    }
   }
 
   const playRemoteAudio = async () => {
@@ -117,7 +149,31 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       summary: 'Gravação da ligação salva com sucesso.',
       metadata: { recordingUrl },
     })
+    await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true })
     return recordingUrl
+  }
+
+  const stopRecorderAndUpload = async () => {
+    const recorder = mediaRecorderRef.current
+    if (!recorder) {
+      await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_started', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+      return null
+    }
+
+    return new Promise<string | null>((resolve) => {
+      recorder.onstop = async () => {
+        const url = await uploadRecording().catch(() => null)
+        if (!url) {
+          await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+        }
+        resolve(url)
+      }
+      if (recorder.state !== 'inactive') {
+        recorder.stop()
+      } else {
+        resolve(null)
+      }
+    })
   }
 
   const cleanupRoom = async (options?: { stopProvidedStream?: boolean }) => {
@@ -130,7 +186,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     }
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
+      await stopRecorderAndUpload().catch(() => null)
     }
     mediaRecorderRef.current = null
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
@@ -241,6 +297,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }
       destinationRef.current = audioContext.createMediaStreamDestination()
       attachStreamForRecording(localStream)
+      startRecording()
 
       const peerConnection = new RTCPeerConnection(rtcConfig)
       peerConnectionRef.current = peerConnection
@@ -268,7 +325,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         if (state === 'connected') {
           startedAtRef.current = Date.now()
           setStatus('active')
-          startRecording()
           await updateDoc(roomRef, { status: 'active', activeAt: serverTimestamp() })
           await setDoc(callRef, { status: 'active', updatedAt: serverTimestamp() }, { merge: true })
           await createAuditLog({
@@ -454,14 +510,23 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     }
   }, [audioSettings?.callVolume, audioSettings?.outputDeviceId])
 
-  const toggleMute = () => {
+  const toggleMute = async () => {
     const nextMuted = !muted
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !nextMuted
     })
     if (nextMuted) {
       localMuteStartedAtRef.current = Date.now()
-      createAuditLog({
+      await setDoc(doc(db, 'calls', callId), {
+        [`${mode === 'caller' ? 'client' : 'employee'}Muted`]: true,
+        [`${mode === 'caller' ? 'client' : 'employee'}MutedAt`]: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      await setDoc(doc(db, 'call_sessions', roomId), {
+        [`${mode === 'caller' ? 'client' : 'employee'}Muted`]: true,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      await createAuditLog({
         companyId,
         companyName,
         clientId: clientUserId || currentUserId,
@@ -477,7 +542,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         mutedDurationRef.current += Math.round((Date.now() - localMuteStartedAtRef.current) / 1000)
         localMuteStartedAtRef.current = null
       }
-      createAuditLog({
+      await setDoc(doc(db, 'calls', callId), {
+        [`${mode === 'caller' ? 'client' : 'employee'}Muted`]: false,
+        [`${mode === 'caller' ? 'client' : 'employee'}UnmutedAt`]: serverTimestamp(),
+        [`${mode === 'caller' ? 'client' : 'employee'}MuteDurationSeconds`]: mutedDurationRef.current,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      await setDoc(doc(db, 'call_sessions', roomId), {
+        [`${mode === 'caller' ? 'client' : 'employee'}Muted`]: false,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      await createAuditLog({
         companyId,
         companyName,
         clientId: clientUserId || currentUserId,
@@ -501,22 +576,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       localMuteStartedAtRef.current = null
     }
 
-    const recordingUrl = await new Promise<string | null>((resolve) => {
-      const recorder = mediaRecorderRef.current
-      if (!recorder) {
-        resolve(null)
-        return
-      }
-      recorder.onstop = async () => {
-        const url = await uploadRecording()
-        resolve(url)
-      }
-      if (recorder.state !== 'inactive') {
-        recorder.stop()
-      } else {
-        resolve(null)
-      }
-    })
+    const recordingUrl = await stopRecorderAndUpload()
 
     const callMessagesSnapshot = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callId)))
     const callMessages = callMessagesSnapshot.docs.map((item) => item.data() as any)
@@ -525,6 +585,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     await updateDoc(roomRef, {
       status: 'ended',
       endedBy: currentUserId,
+      endedByRole: mode === 'agent' ? 'employee' : 'client',
+      [`${mode === 'caller' ? 'client' : 'employee'}DisconnectedAt`]: serverTimestamp(),
+      [`${mode === 'caller' ? 'client' : 'employee'}EndedBeforeEmployeeClose`]: mode === 'caller',
+      muteDuration: mutedDurationRef.current,
+      recordingRequired: true,
+      recordingStatus: recordingUrl ? 'saved' : 'not_saved',
+      recordingUrl: recordingUrl || null,
       endedAt: serverTimestamp(),
       duration: totalDuration,
     })
@@ -537,9 +604,14 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       status: 'completed',
       duration: totalDuration,
       muteDuration: mutedDurationRef.current,
+      [`${mode === 'caller' ? 'client' : 'employee'}DisconnectedAt`]: serverTimestamp(),
+      [`${mode === 'caller' ? 'client' : 'employee'}EndedBeforeEmployeeClose`]: mode === 'caller',
+      endedByRole: mode === 'agent' ? 'employee' : 'client',
       micActiveDuration: Math.max(0, totalDuration - mutedDurationRef.current),
       connectionDrops: connectionDropsRef.current,
       recordingUrl: recordingUrl || null,
+      recordingRequired: true,
+      recordingStatus: recordingUrl ? 'saved' : 'not_saved',
       callChatMessageCount: callMessages.length,
       callChatAttachmentCount: callFiles,
       endedByName: currentUserName,
@@ -648,7 +720,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         </div>
       </div>
 
-      {callMenuOptions.length > 0 && showMobileKeypad ? (
+      {showMobileKeypad ? (
         <div className="mb-24 px-2" data-testid="live-call-mobile-keypad-panel">
           <div className="mx-auto grid max-w-sm grid-cols-3 gap-4">
             {dialpadKeys.map((key) => {
@@ -671,18 +743,23 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="pointer-events-auto mx-auto flex max-w-sm items-center justify-between rounded-full border border-white/10 bg-black/60 px-4 py-3 shadow-2xl backdrop-blur" data-testid="live-call-mobile-floating-navbar">
-          <Button variant="ghost" className="rounded-full bg-white/10 text-white hover:bg-white/15 hover:text-white" onClick={toggleMute} data-testid="live-call-mobile-mute-button">
-            {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-          </Button>
-          {callMenuOptions.length > 0 ? (
-            <Button variant="ghost" className="rounded-full bg-white/10 text-white hover:bg-white/15 hover:text-white" onClick={onToggleMobileKeypad} data-testid="live-call-mobile-keypad-toggle-button">
-              <Grid3X3 className="h-5 w-5" />
-            </Button>
-          ) : null}
-          <Button variant="destructive" className="rounded-full" onClick={endCall} data-testid="live-call-mobile-end-button">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="pointer-events-auto mx-auto grid max-w-sm grid-cols-4 gap-2 rounded-[1.5rem] border border-white/10 bg-black/65 p-2 shadow-2xl backdrop-blur" data-testid="live-call-mobile-floating-navbar">
+          <Button variant="destructive" className="h-14 flex-col gap-1 rounded-2xl px-2 text-[10px]" onClick={endCall} data-testid="live-call-mobile-end-button">
             <PhoneOff className="h-5 w-5" />
+            Desligar
+          </Button>
+          <Button variant="ghost" className="h-14 flex-col gap-1 rounded-2xl bg-white/10 px-2 text-[10px] text-white hover:bg-white/15 hover:text-white" onClick={onToggleMobileKeypad} data-testid="live-call-mobile-keypad-toggle-button">
+            <Grid3X3 className="h-5 w-5" />
+            Discagem
+          </Button>
+          <Button variant="ghost" className="h-14 flex-col gap-1 rounded-2xl bg-white/10 px-2 text-[10px] text-white hover:bg-white/15 hover:text-white" onClick={onOpenMobileChat} data-testid="live-call-mobile-chat-button">
+            <MessageSquare className="h-5 w-5" />
+            Chat
+          </Button>
+          <Button variant="ghost" className="h-14 flex-col gap-1 rounded-2xl bg-white/10 px-2 text-[10px] text-white hover:bg-white/15 hover:text-white" onClick={toggleMute} data-testid="live-call-mobile-mute-button">
+            {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            {muted ? 'Som' : 'Mute'}
           </Button>
         </div>
       </div>

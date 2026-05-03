@@ -255,6 +255,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         callBotGreeting: company.settings?.callBotGreeting || company.botGreeting || '',
         callBotOptions: company.settings?.callBotOptions || company.uraOptions || [],
         callBotVoice: company.settings?.callBotVoice || 'pt-BR',
+        recordingRequired: true,
+        recordingStatus: 'pending',
         createdAt: serverTimestamp(),
       })
 
@@ -267,6 +269,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         clientName: userData?.fullName || user.displayName || 'Cliente',
         status: 'waiting',
         queuePosition: 1,
+        recordingRequired: true,
+        recordingStatus: 'pending',
         createdAt: serverTimestamp(),
       })
 
@@ -329,7 +333,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
   const averageRating = reviews.length > 0 ? reviews.reduce((sum, review: any) => sum + Number(review.rating || 0), 0) / reviews.length : Number(company.rating || 5.0)
   const totalReviews = reviews.length || company.totalReviews || 0
   const isOwnCompany = Boolean(userData?.companyId === company?.id)
-  const canStartAttendance = !user || userData?.role === 'client' || userData?.accountType === 'pf'
+  const isCompanyTeamUser = ['owner', 'manager', 'employee', 'attendant', 'admin'].includes(String(userData?.role || ''))
+  const canStartAttendance = !isOwnCompany && !isCompanyTeamUser
   const primaryColor = company?.corPrimaria || '#2563eb'
   const accentColor = company?.corDestaque || '#38bdf8'
 
@@ -400,9 +405,9 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                 </div>
               </div>
 
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                 {isOwnCompany ? (
-                  <Button asChild className="h-10 w-full px-4 text-sm hover:opacity-90 glow btn-press sm:h-12 sm:w-auto sm:px-8 sm:text-base" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}>
+                  <Button asChild className="col-span-2 h-9 w-full px-3 text-xs hover:opacity-90 glow btn-press sm:col-span-1 sm:h-12 sm:w-auto sm:px-8 sm:text-base" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}>
                     <Link href="/dashboard/settings">Editar perfil</Link>
                   </Button>
                 ) : null}
@@ -411,7 +416,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                     <Button
                       onClick={handleStartChat}
                       disabled={startingChat}
-                      className="h-10 w-full px-4 text-sm hover:opacity-90 glow btn-press sm:h-12 sm:w-auto sm:px-8 sm:text-base"
+                      className="h-9 w-full px-2 text-xs hover:opacity-90 glow btn-press sm:h-12 sm:w-auto sm:px-8 sm:text-base"
                       style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
                       data-testid="public-company-start-chat-button"
                     >
@@ -423,7 +428,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                       ) : (
                         <>
                           <MessageCircle className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                          Iniciar Conversa
+                          <span className="sm:hidden">Chat</span>
+                          <span className="hidden sm:inline">Iniciar Conversa</span>
                         </>
                       )}
                     </Button>
@@ -431,7 +437,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                       variant="outline"
                       onClick={handleStartCall}
                       disabled={startingCall}
-                      className="h-10 w-full px-4 text-sm sm:h-12 sm:w-auto sm:px-8 sm:text-base"
+                      className="h-9 w-full px-2 text-xs sm:h-12 sm:w-auto sm:px-8 sm:text-base"
                       data-testid="public-company-start-call-button"
                     >
                       {startingCall ? (
@@ -442,7 +448,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                       ) : (
                         <>
                           <Phone className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                          Iniciar Ligação
+                          <span className="sm:hidden">Ligação</span>
+                          <span className="hidden sm:inline">Iniciar Ligação</span>
                         </>
                       )}
                     </Button>

@@ -30,6 +30,7 @@ export default function ClientCallPage() {
   const [audioEnabled, setAudioEnabled] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [mobileKeypadOpen, setMobileKeypadOpen] = useState(false)
+  const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
   const spokenRef = useRef(false)
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -112,6 +113,7 @@ export default function ClientCallPage() {
       })
       setLocalStream(stream)
       setAudioEnabled(true)
+      setMobileCallPanel('call')
     } catch {
       toast.error('Permita o uso do microfone para iniciar a chamada no navegador.')
       return
@@ -320,10 +322,10 @@ export default function ClientCallPage() {
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-16 z-20 flex overflow-hidden bg-background lg:left-24" data-testid="client-call-page">
+    <div className="fixed inset-0 z-50 flex overflow-hidden bg-background" data-testid="client-call-page">
       <div className={`grid h-full min-h-0 w-full overflow-hidden bg-background ${session.status === 'active' ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <header className="shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
+      <header className="shrink-0 border-b border-border bg-background/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => router.back()} data-testid="client-call-back-button">
             <ArrowLeft className="h-5 w-5" />
@@ -367,6 +369,7 @@ export default function ClientCallPage() {
             showMobileKeypad={mobileKeypadOpen}
             onToggleMobileKeypad={() => setMobileKeypadOpen((current) => !current)}
             onSelectCallMenuOption={selectCallOption}
+            onOpenMobileChat={() => setMobileCallPanel('chat')}
           />
         ) : (
           <div className="flex h-full items-center justify-center rounded-[2rem] border border-border bg-card/60 p-6 text-center">
@@ -421,6 +424,35 @@ export default function ClientCallPage() {
             employeeId={session.employeeId}
           />
         </aside>
+      ) : null}
+      {audioEnabled && mobileCallPanel === 'chat' ? (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-background xl:hidden" data-testid="client-call-mobile-chat-panel">
+          <header className="shrink-0 border-b border-border bg-background/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" onClick={() => setMobileCallPanel('call')} data-testid="client-call-mobile-chat-back-button">
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <div className="min-w-0">
+                <p className="truncate font-semibold">Chat da ligação</p>
+                <p className="text-xs text-muted-foreground">Protocolo {session.protocolo}</p>
+              </div>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1">
+            <CallRealtimeChat
+              roomId={id}
+              callId={session.callId || id}
+              protocol={session.protocolo}
+              companyId={session.companyId}
+              companyName={session.companyName || 'Empresa'}
+              currentUserId={user.uid}
+              currentUserName={userData?.fullName || user.displayName || 'Cliente'}
+              senderType="client"
+              clientId={user.uid}
+              employeeId={session.employeeId}
+            />
+          </div>
+        </div>
       ) : null}
       </div>
     </div>

@@ -33,8 +33,17 @@ type CallSession = {
   status: 'waiting' | 'ringing' | 'active' | 'ended' | 'completed'
   createdAt?: any
   recordingUrl?: string | null
+  recordingRequired?: boolean
+  recordingStatus?: string
   transferCount?: number
   muteDurationSeconds?: number
+  muteDuration?: number
+  clientMuted?: boolean
+  employeeMuted?: boolean
+  clientDisconnectedAt?: any
+  employeeDisconnectedAt?: any
+  clientEndedBeforeEmployeeClose?: boolean
+  employeeEndedBeforeEmployeeClose?: boolean
 }
 
 type AttendantRecord = {
@@ -374,7 +383,9 @@ export default function TelephonyPage() {
                     <p><strong className="text-foreground">Status:</strong> {activeSession.status}</p>
                     <p><strong className="text-foreground">Data e hora:</strong> {toDate(activeSession.createdAt).toLocaleString('pt-BR')}</p>
                     <p><strong className="text-foreground">Atendente:</strong> {activeSession.employeeName || 'Ainda não assumida'}</p>
-                    <p><strong className="text-foreground">Ações registradas:</strong> Gravação: {activeSession.recordingUrl ? 'disponível' : 'pendente'} • Transferências: {activeSession.transferCount || 0} • Silêncio: {activeSession.muteDurationSeconds || 0}s</p>
+                    <p><strong className="text-foreground">Ações registradas:</strong> Gravação: {activeSession.recordingUrl ? 'disponível' : activeSession.recordingStatus || 'pendente'} • Transferências: {activeSession.transferCount || 0} • Silêncio/mute: {activeSession.muteDurationSeconds || activeSession.muteDuration || 0}s</p>
+                    <p><strong className="text-foreground">Microfones:</strong> Cliente {activeSession.clientMuted ? 'silenciado' : 'ativo'} • Atendente {activeSession.employeeMuted ? 'silenciado' : 'ativo'}</p>
+                    <p><strong className="text-foreground">Desconexões:</strong> Cliente {activeSession.clientDisconnectedAt ? `saiu ${toDate(activeSession.clientDisconnectedAt).toLocaleString('pt-BR')}` : 'conectado'} • Atendente {activeSession.employeeDisconnectedAt ? `saiu ${toDate(activeSession.employeeDisconnectedAt).toLocaleString('pt-BR')}` : 'conectado'}</p>
                   </div>
                 </div>
 
