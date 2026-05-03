@@ -16,7 +16,7 @@ import { Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { signIn, signInWithGoogle, verifyTwoFactorLogin, signOut, user, userData } = useAuth()
+  const { signIn, signInWithGoogle, verifyTwoFactorLogin } = useAuth()
   const [showGoogleType, setShowGoogleType] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,18 +33,6 @@ export default function LoginPage() {
       router.replace('/auth/login')
     }
   }, [router])
-
-  const handleResetTabSession = async () => {
-    setLoading(true)
-    try {
-      await signOut()
-      toast.success('Sessão desta aba liberada para entrar com outra conta.')
-    } catch {
-      toast.error('Não foi possível limpar a sessão desta aba agora.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -154,16 +142,6 @@ export default function LoginPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {user ? (
-                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground" data-testid="login-current-session-banner">
-                  <p className="font-medium text-foreground">Esta aba já está com uma sessão ativa.</p>
-                  <p className="mt-1">Conta atual: {userData?.email || user.email}</p>
-                  <Button type="button" variant="outline" className="mt-3 w-full" onClick={handleResetTabSession} disabled={loading} data-testid="login-use-another-account-button">
-                    Usar outra conta nesta aba
-                  </Button>
-                </div>
-              ) : null}
-
               {/* Login com Google */}
               <Button
                 variant="outline"
