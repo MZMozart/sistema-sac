@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { auth, firebaseEnvReady } from '@/lib/firebase'
+import { firebaseEnvReady } from '@/lib/firebase'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Mail, Lock, Loader2, RefreshCw } from 'lucide-react'
 
@@ -22,7 +22,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [twoFactorRequired, setTwoFactorRequired] = useState(false)
-  const [canResetTwoFactor, setCanResetTwoFactor] = useState(false)
   const [isDesktopShell, setIsDesktopShell] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [keepSignedIn, setKeepSignedIn] = useState(true)
@@ -36,13 +35,6 @@ export default function LoginPage() {
       router.replace('/auth/login')
     }
   }, [router])
-
-  const redirectAfterTwoFactorReset = () => {
-    const pendingType = sessionStorage.getItem('twoFactorPendingType')
-    sessionStorage.removeItem('twoFactorPending')
-    sessionStorage.removeItem('twoFactorPendingType')
-    window.location.href = pendingType === 'cliente' ? '/cliente/dashboard' : '/dashboard'
-  }
 
   const handleRefreshApp = () => {
     window.location.reload()
@@ -128,35 +120,7 @@ export default function LoginPage() {
       await verifyTwoFactorLogin(twoFactorCode)
       toast.success('2FA validado com sucesso!')
     } catch (error: any) {
-      setCanResetTwoFactor(true)
       toast.error('Código 2FA inválido ou expirado.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleResetTwoFactor = async () => {
-    const firebaseUser = auth.currentUser
-    if (!firebaseUser) {
-      toast.error('Faça login com e-mail e senha novamente antes de redefinir o 2FA.')
-      return
-    }
-
-    setLoading(true)
-    try {
-      const token = await firebaseUser.getIdToken()
-      const response = await fetch('/api/twofactor/reset-login', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (!response.ok) throw new Error('twofactor-reset-failed')
-      toast.success('2FA redefinido. Você já pode entrar e configurar novamente depois.')
-      redirectAfterTwoFactorReset()
-    } catch {
-      toast.error('Não foi possível redefinir o 2FA agora.')
     } finally {
       setLoading(false)
     }
@@ -379,11 +343,6 @@ export default function LoginPage() {
                   <Button type="button" variant="outline" className="w-full" onClick={() => { setTwoFactorRequired(false); setTwoFactorCode('') }} disabled={loading}>
                     Voltar para login
                   </Button>
-                  {canResetTwoFactor ? (
-                    <Button type="button" variant="destructive" className="w-full" onClick={handleResetTwoFactor} disabled={loading} data-testid="login-twofactor-reset-button">
-                      Redefinir 2FA desta conta e entrar
-                    </Button>
-                  ) : null}
                 </form>
               )}
 

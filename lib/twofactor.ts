@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { createHmac } from 'node:crypto'
 import { generateSecret, generateURI } from 'otplib'
 
 const base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
@@ -53,7 +53,7 @@ function generateTotp(secret: string, timeStep: number) {
   counter.writeUInt32BE(Math.floor(timeStep / 0x100000000), 0)
   counter.writeUInt32BE(timeStep >>> 0, 4)
 
-  const hmac = crypto.createHmac('sha1', key).update(counter).digest()
+  const hmac = createHmac('sha1', key).update(counter).digest()
   const offset = hmac[hmac.length - 1] & 0xf
   const binary = ((hmac[offset] & 0x7f) << 24)
     | ((hmac[offset + 1] & 0xff) << 16)
@@ -67,11 +67,15 @@ export function verifyTwoFactorCode(code: string, secret: string) {
   const token = normalizeTwoFactorCode(code)
   if (!token || token.length !== 6 || !secret) return false
 
-  const currentStep = Math.floor(Date.now() / 1000 / 30)
-  for (let drift = -3; drift <= 3; drift += 1) {
-    if (generateTotp(secret, currentStep + drift) === token) {
-      return true
+  try {
+    const currentStep = Math.floor(Date.now() / 1000 / 30)
+    for (let drift = -3; drift <= 3; drift += 1) {
+      if (generateTotp(secret, currentStep + drift) === token) {
+        return true
+      }
     }
+  } catch {
+    return false
   }
 
   return false

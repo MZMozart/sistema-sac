@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     const code = String(body.code || '').trim()
     const userSnap = await adminDb.collection('users').doc(uid).get()
     const userData = userSnap.data()
-    const secret = userData?.twoFactorSecret || userData?.pendingTwoFactorSecret
+    const secret = userData?.twoFactorSecret
 
     if (!verifyTwoFactorCode(code, secret)) {
       return NextResponse.json({ error: 'invalid-twofactor-code' }, { status: 400 })
