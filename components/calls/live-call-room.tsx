@@ -58,6 +58,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const recordedChunksRef = useRef<Blob[]>([])
   const audioContextRef = useRef<AudioContext | null>(null)
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  const recordingSourcesRef = useRef<MediaStreamAudioSourceNode[]>([])
   const localMuteStartedAtRef = useRef<number | null>(null)
   const mutedDurationRef = useRef(0)
   const connectionDropsRef = useRef(0)
@@ -77,6 +78,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     if (!audioContextRef.current || !destinationRef.current) return
     const source = audioContextRef.current.createMediaStreamSource(stream)
     source.connect(destinationRef.current)
+    recordingSourcesRef.current.push(source)
   }
 
   const startRecording = () => {
@@ -169,6 +171,20 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       if (response.ok) {
         const payload = await response.json()
         recordingUrl = payload.recordingUrl || null
+      } else {
+        const detail = await response.text().catch(() => '')
+        await createAuditLog({
+          companyId,
+          companyName,
+          clientId: clientUserId || null,
+          employeeId: agentUserId || currentUserId,
+          protocol: auditProtocol,
+          callId,
+          channel: 'call',
+          eventType: 'call_recording_failed',
+          summary: 'A gravação foi capturada, mas não pôde ser enviada para o servidor.',
+          metadata: { detail: detail.slice(0, 500) },
+        }).catch(() => null)
       }
     }
     if (!recordingUrl) return null
@@ -231,6 +247,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     }
     audioContextRef.current = null
     destinationRef.current = null
+    recordingSourcesRef.current = []
   }
 
   useEffect(() => {

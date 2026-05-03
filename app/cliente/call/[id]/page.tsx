@@ -33,6 +33,7 @@ export default function ClientCallPage() {
   const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
+  const speakingRef = useRef(false)
   const localCallStreamRef = useRef<MediaStream | null>(null)
   const callAudioGraphRef = useRef<{
     context: AudioContext
@@ -139,47 +140,58 @@ export default function ClientCallPage() {
   }
 
   const speakText = async (text: string) => {
-    if (!text.trim()) return
-    // A voz da URA usa o texto configurado nos botoes para o cliente ouvir durante a ligacao.
-    const response = await fetch('/api/voice/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: text.slice(0, 4096),
-        voice: company?.settings?.callBotOpenAIVoice || 'alloy',
-        speed: company?.settings?.callBotVoiceSpeed || 1,
-        model: 'tts-1',
-      }),
-    })
-
-    if (!response.ok) {
-      fallbackSpeakText(text)
-      return
-    }
-
-    const blob = await response.blob()
-    const audioUrl = URL.createObjectURL(blob)
-    const graph = callAudioGraphRef.current
-    if (graph) {
-      await graph.context.resume().catch(() => null)
-      graph.botGain.gain.value = botVoiceVolume
-      const audio = new Audio(audioUrl)
-      audio.crossOrigin = 'anonymous'
-      audio.preload = 'auto'
-      audio.volume = 1
-      const source = graph.context.createMediaElementSource(audio)
-      source.connect(graph.botGain)
-      audio.onended = () => {
-        source.disconnect()
-        URL.revokeObjectURL(audioUrl)
-      }
-      await audio.play().catch(() => {
-        URL.revokeObjectURL(audioUrl)
-        fallbackSpeakText(text)
+    const cleanText = text.trim()
+    if (!cleanText || speakingRef.current) return
+    speakingRef.current = true
+    try {
+      // A voz da URA usa o texto configurado nos botões para o cliente ouvir durante a ligação.
+      const response = await fetch('/api/voice/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: cleanText.slice(0, 4096),
+          voice: company?.settings?.callBotOpenAIVoice || 'alloy',
+          speed: company?.settings?.callBotVoiceSpeed || 1,
+          model: 'tts-1',
+        }),
       })
-    } else {
-      URL.revokeObjectURL(audioUrl)
-      fallbackSpeakText(text)
+
+      if (!response.ok) {
+        fallbackSpeakText(cleanText)
+        speakingRef.current = false
+        return
+      }
+
+      const blob = await response.blob()
+      const audioUrl = URL.createObjectURL(blob)
+      const graph = callAudioGraphRef.current
+      if (graph) {
+        await graph.context.resume().catch(() => null)
+        graph.botGain.gain.value = botVoiceVolume
+        const audio = new Audio(audioUrl)
+        audio.crossOrigin = 'anonymous'
+        audio.preload = 'auto'
+        audio.volume = 1
+        const source = graph.context.createMediaElementSource(audio)
+        source.connect(graph.botGain)
+        audio.onended = () => {
+          source.disconnect()
+          URL.revokeObjectURL(audioUrl)
+          speakingRef.current = false
+        }
+        await audio.play().catch(() => {
+          URL.revokeObjectURL(audioUrl)
+          fallbackSpeakText(cleanText)
+          speakingRef.current = false
+        })
+      } else {
+        URL.revokeObjectURL(audioUrl)
+        fallbackSpeakText(cleanText)
+        speakingRef.current = false
+      }
+    } catch {
+      fallbackSpeakText(cleanText)
+      speakingRef.current = false
     }
   }
 
@@ -193,12 +205,10 @@ export default function ClientCallPage() {
     if (!audioEnabled || !callBotSpeech || !session || session.status === 'ended') return
     if (spokenRef.current) return
 
+    spokenRef.current = true
     const timer = window.setTimeout(() => {
-      speakText(callBotSpeech).then(() => {
-        spokenRef.current = true
-      }).catch(() => {
+      speakText(callBotSpeech).catch(() => {
         fallbackSpeakText(callBotSpeech)
-        spokenRef.current = true
       })
     }, 900)
 

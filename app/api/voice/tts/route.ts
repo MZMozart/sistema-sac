@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = JSON.stringify({
-      text: text.slice(0, 4096),
+      input: text.slice(0, 4096),
       voice: body.voice || 'alloy',
       speed: body.speed || 1,
       model: body.model || 'tts-1',
@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const detail = await response.text()
+      console.error('Falha no provedor TTS:', detail || response.statusText)
       return NextResponse.json({ error: detail || 'tts-provider-failed' }, { status: response.status })
     }
 
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     const message = String(error?.message || 'tts-failed')
+    console.error('Falha ao gerar voz da ligação:', message)
     const status = message.includes('insufficient_quota') ? 402 : 500
     return NextResponse.json({ error: message }, { status })
   }

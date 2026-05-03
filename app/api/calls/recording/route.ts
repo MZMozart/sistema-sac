@@ -35,26 +35,31 @@ export async function POST(request: NextRequest) {
     })
     const recordingUrl = signedUrl || `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(path).replace(/%2F/g, '/')}`
 
-    await adminDb.collection('calls').doc(callId).set({
-      recordingRequired: true,
-      recordingStatus: 'saved',
-      recordingUrl,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true })
+    try {
+      await adminDb.collection('calls').doc(callId).set({
+        recordingRequired: true,
+        recordingStatus: 'saved',
+        recordingUrl,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
 
-    await adminDb.collection('audit_logs').add({
-      companyId,
-      protocol,
-      callId,
-      channel: 'call',
-      eventType: 'call_recording_saved',
-      summary: 'Gravação da ligação salva com sucesso.',
-      metadata: { recordingUrl },
-      createdAt: FieldValue.serverTimestamp(),
-    })
+      await adminDb.collection('audit_logs').add({
+        companyId,
+        protocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_saved',
+        summary: 'Gravação da ligação salva com sucesso.',
+        metadata: { recordingUrl },
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    } catch (metadataError: any) {
+      console.error('Gravação enviada, mas não foi possível registrar no Firestore:', metadataError?.message || metadataError)
+    }
 
     return NextResponse.json({ recordingUrl })
   } catch (error: any) {
+    console.error('Falha ao salvar gravação da ligação:', error?.message || error)
     return NextResponse.json({ error: error?.message || 'recording-upload-failed' }, { status: 500 })
   }
 }
