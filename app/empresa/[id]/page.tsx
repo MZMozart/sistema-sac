@@ -329,6 +329,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
   const averageRating = reviews.length > 0 ? reviews.reduce((sum, review: any) => sum + Number(review.rating || 0), 0) / reviews.length : Number(company.rating || 5.0)
   const totalReviews = reviews.length || company.totalReviews || 0
   const isOwnCompany = Boolean(userData?.companyId === company?.id)
+  const canStartAttendance = !user || userData?.role === 'client' || userData?.accountType === 'pf'
   const primaryColor = company?.corPrimaria || '#2563eb'
   const accentColor = company?.corDestaque || '#38bdf8'
 
@@ -405,46 +406,50 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                     <Link href="/dashboard/settings">Editar perfil</Link>
                   </Button>
                 ) : null}
-                <Button
-                  size="lg"
-                  onClick={handleStartChat}
-                  disabled={startingChat}
-                  className="w-full sm:w-auto h-12 px-8 hover:opacity-90 glow btn-press"
-                  style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
-                  data-testid="public-company-start-chat-button"
-                >
-                  {startingChat ? (
-                    <>
-                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                      Iniciando...
-                    </>
-                  ) : (
-                    <>
-                      <MessageCircle className="mr-2 w-5 h-5" />
-                      Iniciar Conversa
-                    </>
-                  )}
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={handleStartCall}
-                  disabled={startingCall}
-                  className="w-full sm:w-auto h-12 px-8"
-                  data-testid="public-company-start-call-button"
-                >
-                  {startingCall ? (
-                    <>
-                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                      Conectando...
-                    </>
-                  ) : (
-                    <>
-                      <Phone className="mr-2 w-5 h-5" />
-                      Iniciar Ligação
-                    </>
-                  )}
-                </Button>
+                {canStartAttendance ? (
+                  <>
+                    <Button
+                      size="lg"
+                      onClick={handleStartChat}
+                      disabled={startingChat}
+                      className="w-full sm:w-auto h-12 px-8 hover:opacity-90 glow btn-press"
+                      style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
+                      data-testid="public-company-start-chat-button"
+                    >
+                      {startingChat ? (
+                        <>
+                          <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                          Iniciando...
+                        </>
+                      ) : (
+                        <>
+                          <MessageCircle className="mr-2 w-5 h-5" />
+                          Iniciar Conversa
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      onClick={handleStartCall}
+                      disabled={startingCall}
+                      className="w-full sm:w-auto h-12 px-8"
+                      data-testid="public-company-start-call-button"
+                    >
+                      {startingCall ? (
+                        <>
+                          <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                          Conectando...
+                        </>
+                      ) : (
+                        <>
+                          <Phone className="mr-2 w-5 h-5" />
+                          Iniciar Ligação
+                        </>
+                      )}
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>

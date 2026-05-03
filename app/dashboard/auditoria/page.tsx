@@ -150,23 +150,6 @@ export default function AuditoriaPage() {
 
           <div className="space-y-6">
             <Card className="glass border-border/80">
-              <CardHeader><CardTitle>Resumo de mensagens por protocolo</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {filteredCases.filter((item) => item.messages.length > 0).slice(0, 20).map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <Link href={`/dashboard/auditoria/${encodeURIComponent(item.protocol)}`} className="text-sm font-medium text-primary hover:underline">{item.protocol}</Link>
-                      <span className="text-xs text-muted-foreground">{item.messages.length} mensagens</span>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">
-                      {item.messages[item.messages.length - 1]?.content || item.messages[item.messages.length - 1]?.message || 'Sem conteúdo textual.'}
-                    </p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="glass border-border/80">
               <CardHeader><CardTitle>Reprodução da ligação</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {calls.filter((item) => !queryText || String(item.protocolo || '').toLowerCase().includes(queryText.toLowerCase()) || String(item.clientName || '').toLowerCase().includes(queryText.toLowerCase()) || String(item.employeeName || '').toLowerCase().includes(queryText.toLowerCase())).slice(0, 10).map((call) => (

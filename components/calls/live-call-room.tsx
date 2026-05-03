@@ -151,6 +151,21 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   }, [status])
 
   const formattedDuration = useMemo(() => `${String(Math.floor(duration / 60)).padStart(2, '0')}:${String(duration % 60).padStart(2, '0')}`, [duration])
+  const dialpadKeys = [
+    { digit: '1', letters: '' },
+    { digit: '2', letters: 'ABC' },
+    { digit: '3', letters: 'DEF' },
+    { digit: '4', letters: 'GHI' },
+    { digit: '5', letters: 'JKL' },
+    { digit: '6', letters: 'MNO' },
+    { digit: '7', letters: 'PQRS' },
+    { digit: '8', letters: 'TUV' },
+    { digit: '9', letters: 'WXYZ' },
+    { digit: '*', letters: '' },
+    { digit: '0', letters: '+' },
+    { digit: '#', letters: '' },
+  ]
+  const getOptionForDigit = (digit: string) => callMenuOptions.find((option) => String(option?.digit) === digit)
 
   useEffect(() => {
     const setup = async () => {
@@ -634,21 +649,24 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       </div>
 
       {callMenuOptions.length > 0 && showMobileKeypad ? (
-        <div className="mb-24 rounded-[2rem] border border-white/10 bg-black/25 p-4 backdrop-blur" data-testid="live-call-mobile-keypad-panel">
-          <p className="mb-3 text-xs uppercase tracking-[0.2em] text-white/60">Teclado numérico</p>
-          <div className="grid grid-cols-3 gap-2">
-            {callMenuOptions.map((option, index) => (
-              <button
-                key={`${option?.digit || index}`}
-                type="button"
-                onClick={() => onSelectCallMenuOption?.(option)}
-                className={`rounded-2xl border px-3 py-4 text-left transition ${selectedCallMenuOption === String(option?.digit || option?.label || index) ? 'border-sky-300 bg-sky-300/20' : 'border-white/10 bg-white/5'}`}
-                data-testid={`live-call-mobile-keypad-option-${option?.digit || index}`}
-              >
-                <p className="text-lg font-semibold">{option?.digit || index + 1}</p>
-                <p className="mt-1 text-xs text-white/70">{option?.label || 'Opção'}</p>
-              </button>
-            ))}
+        <div className="mb-24 px-2" data-testid="live-call-mobile-keypad-panel">
+          <div className="mx-auto grid max-w-sm grid-cols-3 gap-4">
+            {dialpadKeys.map((key) => {
+              const option = getOptionForDigit(key.digit)
+              const selected = selectedCallMenuOption === key.digit
+              return (
+                <button
+                  key={key.digit}
+                  type="button"
+                  onClick={() => onSelectCallMenuOption?.(option || { digit: key.digit, label: `Tecla ${key.digit}` })}
+                  className={`aspect-square rounded-full border text-center shadow-xl transition active:scale-95 ${selected ? 'border-sky-300 bg-sky-300/25' : 'border-white/10 bg-white/10 hover:bg-white/15'}`}
+                  data-testid={`live-call-mobile-keypad-option-${key.digit}`}
+                >
+                  <p className="text-3xl font-semibold leading-none">{key.digit}</p>
+                  <p className="mt-1 min-h-4 text-[10px] font-bold tracking-[0.22em] text-white/65">{option?.label ? String(option.label).slice(0, 12) : key.letters}</p>
+                </button>
+              )
+            })}
           </div>
         </div>
       ) : null}

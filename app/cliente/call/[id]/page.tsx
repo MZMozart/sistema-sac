@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/contexts/auth-context'
 import { LiveCallRoom } from '@/components/calls/live-call-room'
@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
-import { ArrowLeft, Bot, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Phone } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function ClientCallPage() {
@@ -32,6 +32,21 @@ export default function ClientCallPage() {
   const [mobileKeypadOpen, setMobileKeypadOpen] = useState(false)
   const spokenRef = useRef(false)
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  const dialpadKeys = [
+    { digit: '1', letters: '' },
+    { digit: '2', letters: 'ABC' },
+    { digit: '3', letters: 'DEF' },
+    { digit: '4', letters: 'GHI' },
+    { digit: '5', letters: 'JKL' },
+    { digit: '6', letters: 'MNO' },
+    { digit: '7', letters: 'PQRS' },
+    { digit: '8', letters: 'TUV' },
+    { digit: '9', letters: 'WXYZ' },
+    { digit: '*', letters: '' },
+    { digit: '0', letters: '+' },
+    { digit: '#', letters: '' },
+  ]
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'call_sessions', id), (snap) => {
@@ -68,6 +83,14 @@ export default function ClientCallPage() {
 
   const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || '', [company])
   const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || [], [company])
+  const callBotSpeech = useMemo(() => {
+    const intro = callBotGreeting || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
+    const optionsText = callBotOptions
+      .filter((option: any) => option?.digit || option?.label)
+      .map((option: any) => `Digite ${option?.digit || ''} para ${option?.speech || option?.description || option?.label || 'continuar'}.`)
+      .join(' ')
+    return [intro, optionsText].filter(Boolean).join(' ')
+  }, [callBotGreeting, callBotOptions, session?.companyName])
   const botVoiceVolume = useMemo(() => {
     const configuredVolume = Number(company?.settings?.audioSettings?.botVoiceVolume ?? 100)
     return Math.max(0, Math.min(1, configuredVolume / 100))
@@ -94,8 +117,8 @@ export default function ClientCallPage() {
       return
     }
 
-    if (callBotGreeting && !spokenRef.current && session?.status !== 'active' && session?.status !== 'ended') {
-      speakText(callBotGreeting).then(() => {
+    if (callBotSpeech && !spokenRef.current && session?.status !== 'ended') {
+      speakText(callBotSpeech).then(() => {
         spokenRef.current = true
       }).catch(() => {
         toast.error('Não foi possível tocar a voz automática da ligação agora.')
@@ -131,13 +154,13 @@ export default function ClientCallPage() {
   }
 
   useEffect(() => {
-    if (!callBotGreeting || !session || session.status === 'active' || session.status === 'ended') return
+    if (!audioEnabled || !callBotSpeech || !session || session.status === 'ended') return
     if (spokenRef.current) return
 
-    speakText(callBotGreeting).then(() => {
+    speakText(callBotSpeech).then(() => {
       spokenRef.current = true
     }).catch(() => null)
-  }, [callBotGreeting, session])
+  }, [audioEnabled, callBotSpeech, session])
 
   useEffect(() => {
     return () => {
@@ -147,24 +170,26 @@ export default function ClientCallPage() {
 
   const selectCallOption = async (option: any) => {
     if (!session) return
-    setSelectedOption(option?.digit || String(option?.label || ''))
+    const optionDigit = String(option?.digit || '')
+    const optionLabel = option?.label || (optionDigit ? `Tecla ${optionDigit}` : 'Opção')
+    setSelectedOption(optionDigit || String(optionLabel))
     try {
       const targetOption = option?.action === 'goto'
         ? callBotOptions.find((item: any) => String(item?.digit) === String(option?.targetDigit || ''))
         : null
-      const spokenText = targetOption?.speech || option?.actionLabel || option?.speech || option?.description || option?.label || ''
+      const spokenText = targetOption?.speech || option?.actionLabel || option?.speech || option?.description || option?.label || (optionDigit ? `Você selecionou a opção ${optionDigit}.` : '')
       await updateDoc(doc(db, 'call_sessions', id), {
-        selectedOptionDigit: option?.digit || null,
-        selectedOptionLabel: option?.label || null,
+        selectedOptionDigit: optionDigit || null,
+        selectedOptionLabel: optionLabel || null,
         selectedOptionDescription: spokenText || null,
         selectedOptionAt: serverTimestamp(),
       })
-      await updateDoc(doc(db, 'calls', session.callId || id), {
-        selectedOptionDigit: option?.digit || null,
-        selectedOptionLabel: option?.label || null,
+      await setDoc(doc(db, 'calls', session.callId || id), {
+        selectedOptionDigit: optionDigit || null,
+        selectedOptionLabel: optionLabel || null,
         selectedOptionDescription: spokenText || null,
         selectedOptionAt: serverTimestamp(),
-      })
+      }, { merge: true })
       await createAuditLog({
         companyId: session.companyId,
         companyName: session.companyName,
@@ -176,8 +201,13 @@ export default function ClientCallPage() {
         clientName: userData?.fullName || user?.displayName || session.clientName || 'Cliente',
         employeeId: session.employeeId || null,
         employeeName: session.employeeName || null,
-        summary: `Cliente selecionou a opção ${option?.digit || '-'} da ligação.`,
-        metadata: option,
+        summary: `Cliente selecionou a opção ${optionDigit || '-'} da ligação.`,
+        metadata: {
+          digit: optionDigit || null,
+          label: optionLabel || null,
+          action: option?.action || null,
+          targetDigit: option?.targetDigit || null,
+        },
       })
       if (option?.action === 'end') {
         await updateDoc(doc(db, 'call_sessions', id), { status: 'ended', endedAt: serverTimestamp(), closedBy: 'client_menu' })
@@ -205,11 +235,43 @@ export default function ClientCallPage() {
           entityType: 'call',
         })
       }
-      await speakText(spokenText)
-    } catch {
+      if (spokenText) {
+        speakText(spokenText).catch(() => null)
+      }
+    } catch (error) {
+      console.error('Call option registration error:', error)
       toast.error('Não foi possível registrar essa opção da ligação agora.')
     }
   }
+
+  const optionForDigit = (digit: string) => callBotOptions.find((option: any) => String(option?.digit) === digit)
+
+  const renderDialpad = (dark = false) => (
+    <div className="mx-auto grid max-w-sm grid-cols-3 gap-4" data-testid="client-call-dialpad">
+      {dialpadKeys.map((key) => {
+        const option = optionForDigit(key.digit)
+        const selected = selectedOption === key.digit
+        return (
+          <button
+            key={key.digit}
+            type="button"
+            onClick={() => selectCallOption(option || { digit: key.digit, label: `Tecla ${key.digit}` })}
+            className={`aspect-square rounded-full border text-center shadow-lg transition active:scale-95 ${
+              selected
+                ? dark ? 'border-sky-300 bg-sky-300/25 text-white' : 'border-primary bg-primary/10 text-foreground'
+                : dark ? 'border-white/10 bg-white/10 text-white hover:bg-white/15' : 'border-border bg-card/80 text-foreground hover:border-primary/60'
+            }`}
+            data-testid={`client-call-dialpad-key-${key.digit}`}
+          >
+            <span className="block text-3xl font-semibold leading-none">{key.digit}</span>
+            <span className={`mt-1 block min-h-4 text-[10px] font-bold tracking-[0.22em] ${dark ? 'text-white/65' : 'text-muted-foreground'}`}>
+              {option?.label ? String(option.label).slice(0, 12) : key.letters}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 
   const submitRating = async () => {
     if (!user || !session || ratingSaved) return
@@ -273,27 +335,14 @@ export default function ClientCallPage() {
         </div>
       </header>
 
-      {session.status !== 'active' && callBotGreeting ? (
-        <div className="shrink-0 space-y-3 border-b border-border px-4 py-3">
-          <div className="rounded-3xl border border-border bg-card/60 p-4 text-sm text-muted-foreground" data-testid="client-call-bot-greeting">
-            <div className="mb-2 flex items-center gap-2 font-medium text-foreground"><Bot className="h-4 w-4 text-primary" /> Atendimento automático</div>
-            {callBotGreeting}
-          </div>
+      {session.status !== 'active' ? (
+        <div className="shrink-0 space-y-4 border-b border-border px-4 py-4">
           {typeof session?.queuePosition === 'number' ? (
             <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3 text-xs text-primary" data-testid="client-call-queue-banner">
               Sua posição na fila: {session.queuePosition} • Pessoas na sua frente: {Math.max(0, Number(session.queuePosition || 1) - 1)}
             </div>
           ) : null}
-          {callBotOptions.length > 0 ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="client-call-keypad-grid">
-              {callBotOptions.map((option: any, index: number) => (
-                <button key={`${option?.digit || index}-${option?.label || index}`} type="button" onClick={() => selectCallOption(option)} className={`rounded-2xl border p-3 text-left transition ${selectedOption === (option?.digit || String(option?.label || '')) ? 'border-primary bg-primary/10' : 'border-border bg-card/60'}`} data-testid={`client-call-option-${option?.digit || index}`}>
-                  <p className="text-sm font-semibold text-foreground">{option?.digit || index + 1}</p>
-                  <p className="mt-1 text-xs font-medium text-foreground">{option?.label || 'Opção'}</p>
-                </button>
-              ))}
-            </div>
-          ) : null}
+          {renderDialpad(false)}
         </div>
       ) : null}
 
@@ -322,10 +371,13 @@ export default function ClientCallPage() {
         ) : (
           <div className="flex h-full items-center justify-center rounded-[2rem] border border-border bg-card/60 p-6 text-center">
             <div>
-              <p className="text-lg font-semibold">Ativar áudio da ligação</p>
-              <p className="mt-2 text-sm text-muted-foreground">No navegador web, toque primeiro para liberar microfone e áudio em tempo real.</p>
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white">
+                <Phone className="h-7 w-7" />
+              </div>
+              <p className="text-lg font-semibold">Iniciar ligação</p>
+              <p className="mt-2 text-sm text-muted-foreground">Toque para liberar o microfone e ouvir a saudação automática com as opções do teclado.</p>
               <Button className="mt-4" onClick={enableAudio} data-testid="client-call-enable-audio-button">
-                Iniciar áudio da ligação
+                Iniciar ligação e ouvir opções
               </Button>
             </div>
           </div>
