@@ -185,6 +185,34 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       localStreamRef.current = localStream
       remoteStreamRef.current = remoteStream
 
+      const waitForRoomOffer = async () => {
+        const immediateSnapshot = await getDoc(roomRef)
+        const immediateData = immediateSnapshot.data()
+        if (immediateData?.offer) return immediateData.offer
+
+        return new Promise<any | null>((resolve) => {
+          let unsubscribe: (() => void) | null = null
+          const timeout = window.setTimeout(() => {
+            unsubscribe?.()
+            resolve(null)
+          }, 15000)
+
+          unsubscribe = onSnapshot(roomRef, (snapshot) => {
+            const data = snapshot.data()
+            if (data?.offer) {
+              window.clearTimeout(timeout)
+              unsubscribe?.()
+              resolve(data.offer)
+            }
+            if (data?.status === 'ended') {
+              window.clearTimeout(timeout)
+              unsubscribe?.()
+              resolve(null)
+            }
+          })
+        })
+      }
+
       const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
       if (!AudioContextCtor) {
         throw new Error('Este navegador não oferece suporte ao áudio da chamada.')
@@ -338,10 +366,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         })
         cleanupFnsRef.current.push(unsubscribeAnswerCandidates)
       } else {
-        const roomSnapshot = await getDoc(roomRef)
-        const roomData = roomSnapshot.data()
-        if (!roomData?.offer) {
-          toast.error('A oferta da chamada ainda não está pronta.')
+        const offer = await waitForRoomOffer()
+        if (!offer) {
+          toast.error('A oferta da chamada ainda não está pronta. Aguarde alguns segundos e tente novamente.')
           setStatus('waiting')
           setLoading(false)
           return
@@ -354,7 +381,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           }
         }
 
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer))
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
         localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream))
         const answer = await peerConnection.createAnswer()
         await peerConnection.setLocalDescription(answer)
