@@ -25,7 +25,7 @@ export const firebaseConfig = {
   apiKey: publicFirebaseEnv.apiKey || 'missing-api-key',
   authDomain: getRuntimeAuthDomain() || 'missing.firebaseapp.com',
   projectId: publicFirebaseEnv.projectId || 'missing-project-id',
-  storageBucket: publicFirebaseEnv.storageBucket || (publicFirebaseEnv.projectId ? `${publicFirebaseEnv.projectId}.firebasestorage.app` : 'missing-project-id.firebasestorage.app'),
+  storageBucket: publicFirebaseEnv.storageBucket || (publicFirebaseEnv.projectId ? `${publicFirebaseEnv.projectId}.appspot.com` : 'missing-project-id.appspot.com'),
   messagingSenderId: publicFirebaseEnv.messagingSenderId || '0',
   appId: publicFirebaseEnv.appId || 'missing-app-id',
 }
