@@ -29,6 +29,7 @@ import type { User, AccountType, Company } from '@/lib/types'
 
 const googleRedirectAccountTypeKey = 'atendepro.googleRedirect.accountType'
 const googleRegisterAccountTypeKey = 'atendepro.googleRegister.accountType'
+const keepSignedInKey = 'atendepro.auth.keepSignedIn'
 
 export class AuthService {
   static async ensureTabScopedSession() {
@@ -37,6 +38,30 @@ export class AuthService {
 
   static async ensureDeviceScopedSession() {
     await setPersistence(auth, browserLocalPersistence)
+  }
+
+  static getKeepSignedInPreference() {
+    if (typeof window === 'undefined') return true
+    try {
+      return window.localStorage.getItem(keepSignedInKey) !== '0'
+    } catch {
+      return true
+    }
+  }
+
+  static setKeepSignedInPreference(keepSignedIn: boolean) {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(keepSignedInKey, keepSignedIn ? '1' : '0')
+    } catch {}
+  }
+
+  static async applyStoredPersistencePreference() {
+    if (this.getKeepSignedInPreference()) {
+      await this.ensureDeviceScopedSession()
+    } else {
+      await this.ensureTabScopedSession()
+    }
   }
 
   static isEmbeddedApp() {
@@ -59,7 +84,7 @@ export class AuthService {
     try {
       window.localStorage.removeItem(googleRedirectAccountTypeKey)
     } catch {
-      // Local storage can be unavailable in restricted embedded browsers.
+      // O armazenamento local pode estar indisponível em navegadores restritos.
     }
   }
 
@@ -77,7 +102,7 @@ export class AuthService {
     try {
       window.localStorage.removeItem(googleRegisterAccountTypeKey)
     } catch {
-      // Local storage can be unavailable in restricted embedded browsers.
+      // O armazenamento local pode estar indisponível em navegadores restritos.
     }
   }
 
@@ -180,7 +205,7 @@ export class AuthService {
     return firebaseUser
   }
 
-  // Email and Password Authentication
+  // Autenticação por e-mail e senha
   static async signUp(
     email: string,
     password: string,
@@ -192,14 +217,14 @@ export class AuthService {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
       const firebaseUser = userCredential.user
 
-      // Send email verification
+      // Envia verificação de e-mail
       try {
         await sendEmailVerification(firebaseUser)
       } catch (error) {
-        console.warn('Could not send verification email:', error)
+        console.warn('Não foi possível enviar o e-mail de verificação:', error)
       }
 
-      // Create user document in Firestore
+      // Cria o documento do usuário no Firestore
       const userDoc: Omit<User, 'uid' | 'createdAt'> = {
         name: userData.name || userData.fullName || '',
         email,
@@ -231,6 +256,7 @@ export class AuthService {
       } else {
         await this.ensureTabScopedSession()
       }
+      this.setKeepSignedInPreference(keepSignedIn)
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
       return userCredential.user
     } catch (error) {
@@ -239,7 +265,7 @@ export class AuthService {
     }
   }
 
-  // Google Authentication
+  // Autenticação com Google
   static async signInWithGoogle(accountType?: AccountType): Promise<FirebaseUser> {
     try {
       await this.ensureDeviceScopedSession()
@@ -262,18 +288,18 @@ export class AuthService {
     }
   }
 
-  // Apple Authentication
+  // Autenticação com Apple
   static async signInWithApple(accountType?: AccountType): Promise<FirebaseUser> {
     try {
       await this.ensureTabScopedSession()
       const result = await signInWithPopup(auth, appleProvider)
       const firebaseUser = result.user
 
-      // Check if user exists in Firestore
+      // Verifica se o usuário existe no Firestore
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
 
       if (!userDoc.exists()) {
-        // Create new user
+        // Cria um novo usuário
         const newUser: Omit<User, 'uid' | 'createdAt'> = {
           name: firebaseUser.displayName || '',
           email: firebaseUser.email || '',
@@ -299,7 +325,7 @@ export class AuthService {
     }
   }
 
-  // Phone Authentication
+  // Autenticação por telefone
   static async signInWithPhone(
     phoneNumber: string,
     recaptchaContainer: HTMLElement,
@@ -313,7 +339,7 @@ export class AuthService {
 
       const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier)
 
-      // Store accountType for later use
+      // Guarda o tipo de conta para concluir o fluxo depois
       sessionStorage.setItem('pendingAccountType', accountType || 'pf')
 
       return confirmationResult
@@ -332,11 +358,11 @@ export class AuthService {
       const firebaseUser = result.user
       const accountType = sessionStorage.getItem('pendingAccountType') as AccountType || 'pf'
 
-      // Check if user exists in Firestore
+      // Verifica se o usuário existe no Firestore
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
 
       if (!userDoc.exists()) {
-        // Create new user
+        // Cria um novo usuário
         const newUser: Omit<User, 'uid' | 'createdAt'> = {
           name: firebaseUser.displayName || '',
           email: firebaseUser.email || '',
@@ -363,7 +389,7 @@ export class AuthService {
     }
   }
 
-  // Password Reset
+  // Redefinição de senha
   static async resetPassword(email: string): Promise<void> {
     try {
       const normalizedEmail = email.trim().toLowerCase()
@@ -429,9 +455,10 @@ export class AuthService {
     }
   }
 
-  // Sign Out
+  // Sair da conta
   static async signOut(): Promise<void> {
     try {
+      this.setKeepSignedInPreference(false)
       await firebaseSignOut(auth)
     } catch (error) {
       console.error('Sign out error:', error)
@@ -439,14 +466,14 @@ export class AuthService {
     }
   }
 
-  // Update Profile
+  // Atualização de perfil
   static async updateProfile(updates: { displayName?: string; photoURL?: string }): Promise<void> {
     try {
       const currentUser = auth.currentUser
       if (currentUser) {
         await updateProfile(currentUser, updates)
 
-        // Update in Firestore too
+        // Atualiza também no Firestore
         await updateDoc(doc(db, 'users', currentUser.uid), updates)
       }
     } catch (error) {
@@ -455,7 +482,7 @@ export class AuthService {
     }
   }
 
-  // Update Email
+  // Atualização de e-mail
   static async updateEmail(newEmail: string): Promise<void> {
     try {
       const currentUser = auth.currentUser
@@ -469,7 +496,7 @@ export class AuthService {
     }
   }
 
-  // Update Password
+  // Atualização de senha
   static async updatePassword(newPassword: string): Promise<void> {
     try {
       const currentUser = auth.currentUser

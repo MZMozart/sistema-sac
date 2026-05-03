@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifySync } from 'otplib'
 import { getServerUser } from '@/lib/server-auth'
 import { adminDb } from '@/lib/firebase-admin'
+import { verifyTwoFactorCode } from '@/lib/twofactor'
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const userSnap = await userRef.get()
     const secret = userSnap.data()?.twoFactorSecret
 
-    if (!secret || !code || !verifySync({ token: code, secret })) {
+    if (!verifyTwoFactorCode(code, secret)) {
       return NextResponse.json({ error: 'invalid-twofactor-code' }, { status: 400 })
     }
 

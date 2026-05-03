@@ -65,7 +65,7 @@ export default function LoginPage() {
 
       toast.success('Login realizado com sucesso!')
     } catch (error: any) {
-      console.error('Login error:', error)
+      console.error('Erro no login:', error)
       if (error.code === 'auth/user-not-found') {
         toast.error('Usuário não encontrado')
       } else if (error.code === 'auth/wrong-password') {
@@ -97,7 +97,7 @@ export default function LoginPage() {
 
       toast.success('Login realizado com sucesso!')
     } catch (error: any) {
-      console.error('Google login error:', error)
+      console.error('Erro no login com Google:', error)
       if (error.code === 'auth/popup-closed-by-user') {
         toast.error('Login cancelado')
       } else if (error.code === 'auth/popup-blocked') {
@@ -134,7 +134,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
+      {/* Cabeçalho */}
       <header className="app-fixed-header fixed top-0 left-0 right-0 z-50 glass-strong border-b border-border">
         <div className="container mx-auto flex min-h-16 items-center justify-between px-4">
           <div className="w-10" />
@@ -143,7 +143,7 @@ export default function LoginPage() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Conteúdo principal */}
       <main className="app-main-offset safe-page-x flex flex-1 items-center justify-center">
         <div className="w-full max-w-md">
           <Card className="border-border bg-card/80 backdrop-blur-sm animate-scale-in">
@@ -164,7 +164,7 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              {/* Google Sign In */}
+              {/* Login com Google */}
               <Button
                 variant="outline"
                 className="w-full h-12 text-base gap-3 border-border hover:bg-secondary btn-press"
@@ -192,7 +192,7 @@ export default function LoginPage() {
                 Continuar com Google
               </Button>
 
-              {/* Google type selection overlay */}
+              {/* Seleção do tipo de conta no Google */}
               {showGoogleType && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                   <div className="bg-card p-6 rounded-lg w-full max-w-sm space-y-4">
@@ -237,7 +237,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Email/Password Form */}
+              {/* Formulário de e-mail e senha */}
               {!twoFactorRequired ? <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <label htmlFor="email" className="text-sm font-medium">
@@ -366,7 +366,7 @@ export default function LoginPage() {
         </div>
       </main>
 
-      {/* Decorative elements */}
+      {/* Elementos decorativos */}
       <div className="fixed top-20 left-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
       <div className="fixed bottom-20 right-10 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
     </div>

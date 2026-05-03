@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
-import { generateSecret, generateURI } from 'otplib'
 import { getServerUser } from '@/lib/server-auth'
 import { adminDb } from '@/lib/firebase-admin'
+import { generateTwoFactorSecret, generateTwoFactorUri } from '@/lib/twofactor'
 
 export async function POST(request: NextRequest) {
   try {
     const { uid, userData } = await getServerUser(request)
-    const secret = generateSecret()
+    const secret = generateTwoFactorSecret()
     const issuer = 'AtendePro'
     const label = userData?.email || uid
-    const otpAuthUrl = generateURI({ issuer, label, secret })
+    const otpAuthUrl = generateTwoFactorUri(label, issuer, secret)
     const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl)
 
     await adminDb.collection('users').doc(uid).set({

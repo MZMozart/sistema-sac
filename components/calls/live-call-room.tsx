@@ -81,6 +81,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   const startRecording = () => {
     if (!destinationRef.current || mediaRecorderRef.current) return
+    recordingFinalizedRef.current = false
     if (typeof MediaRecorder === 'undefined') {
       setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'unsupported', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
       createAuditLog({
@@ -189,12 +190,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   const stopRecorderAndUpload = async () => {
     if (recordingFinalizedRef.current) return null
-    recordingFinalizedRef.current = true
     const recorder = mediaRecorderRef.current
     if (!recorder) {
-      await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_started', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
       return null
     }
+    recordingFinalizedRef.current = true
 
     return new Promise<string | null>((resolve) => {
       recorder.onstop = async () => {
@@ -205,6 +205,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         resolve(url)
       }
       if (recorder.state !== 'inactive') {
+        recorder.requestData()
         recorder.stop()
       } else {
         resolve(null)

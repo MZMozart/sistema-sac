@@ -75,19 +75,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser)
-      if (firebaseUser) {
-        await fetchUserData(firebaseUser)
-      } else {
-        setUserData(null)
-        setCompany(null)
-        setEmployee(null)
-      }
-      setLoading(false)
-    })
+    let unsubscribe: (() => void) | null = null
+    let cancelled = false
 
-    return () => unsubscribe()
+    const startAuthListener = async () => {
+      try {
+        await AuthService.applyStoredPersistencePreference()
+      } catch {}
+
+      if (cancelled) return
+
+      unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        setUser(firebaseUser)
+        if (firebaseUser) {
+          await fetchUserData(firebaseUser)
+        } else {
+          setUserData(null)
+          setCompany(null)
+          setEmployee(null)
+        }
+        setLoading(false)
+      })
+    }
+
+    startAuthListener()
+
+    return () => {
+      cancelled = true
+      unsubscribe?.()
+    }
   }, [])
 
   useEffect(() => {
@@ -212,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     try {
       await AuthService.signUp(email, password, type, data)
-      // Fetch user data after signup
+      // Busca os dados do usuário após o cadastro
       const firebaseUser = auth.currentUser;
       let userDataObj = null;
       if (firebaseUser) {
