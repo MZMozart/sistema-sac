@@ -183,7 +183,7 @@ export default function VerifiedPlanPage() {
                 {openingPortal ? 'Abrindo portal...' : 'Gerenciar assinatura'}
               </Button>
               {companyAny?.premiumVerificationCustomerId ? (
-                <Badge variant="outline" data-testid="verified-plan-customer-id-badge">Cliente Stripe vinculado</Badge>
+                <Badge variant="outline" data-testid="verified-plan-customer-id-badge">Assinatura Kiwify vinculada</Badge>
               ) : null}
             </div>
           </CardContent>
@@ -226,20 +226,20 @@ export default function VerifiedPlanPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border border-border bg-card/60 p-4"><TrendingUp className="mb-3 h-5 w-5 text-primary" /><p className="font-medium">Mais conversão</p><p className="mt-1 text-sm text-muted-foreground">Reduz a desconfiança de novos clientes.</p></div>
             <div className="rounded-2xl border border-border bg-card/60 p-4"><BadgeCheck className="mb-3 h-5 w-5 text-primary" /><p className="font-medium">Destaque visual</p><p className="mt-1 text-sm text-muted-foreground">O selo aparece ao lado do nome da empresa.</p></div>
-            <div className="rounded-2xl border border-border bg-card/60 p-4"><Sparkles className="mb-3 h-5 w-5 text-primary" /><p className="font-medium">Plano recorrente</p><p className="mt-1 text-sm text-muted-foreground">Cobrança mensal segura via cartão.</p></div>
+            <div className="rounded-2xl border border-border bg-card/60 p-4"><Sparkles className="mb-3 h-5 w-5 text-primary" /><p className="font-medium">Plano recorrente</p><p className="mt-1 text-sm text-muted-foreground">Cobrança mensal por Pix, boleto ou cartão.</p></div>
           </div>
 
           <Button onClick={startCheckout} disabled={loading} className="w-full bg-gradient-primary" data-testid="verified-plan-start-checkout-button">
             {loading ? 'Abrindo pagamento seguro...' : 'Assinar selo verificado'}
           </Button>
-          <p className="text-xs text-muted-foreground">Pagamento seguro com cartão nacional ou internacional via Stripe Checkout.</p>
+          <p className="text-xs text-muted-foreground">Pagamento seguro pela Kiwify. A ativação do selo acontece automaticamente quando a compra for aprovada.</p>
         </CardContent>
       </Card>
 
       <Card className="glass border-border/80">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Pré-visualização do cartão</CardTitle>
-          <CardDescription>O preenchimento abaixo é uma pré-visualização visual do cartão. O pagamento real acontece com segurança na etapa Stripe.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Pré-visualização do pagamento</CardTitle>
+          <CardDescription>O checkout real acontece na Kiwify, com Pix, boleto e cartão. Esta área é apenas uma simulação visual para apresentação.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="rounded-3xl bg-slate-950 p-6 text-white shadow-xl">
