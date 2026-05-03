@@ -409,7 +409,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
                 </div>
               </div>
 
-              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+              <div className="hidden w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                 {isOwnCompany ? (
                   <Button asChild className="col-span-2 h-9 w-full px-3 text-xs hover:opacity-90 glow btn-press sm:col-span-1 sm:h-12 sm:w-auto sm:px-8 sm:text-base" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}>
                     <Link href="/dashboard/settings">Editar perfil</Link>

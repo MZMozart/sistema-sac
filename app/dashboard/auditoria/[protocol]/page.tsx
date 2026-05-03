@@ -15,6 +15,31 @@ function toDate(value: any) {
   return new Date(value)
 }
 
+function formatSeconds(value: any) {
+  const seconds = Math.max(0, Number(value || 0))
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  if (minutes <= 0) return `${rest}s`
+  return `${minutes}min ${rest}s`
+}
+
+function cleanSummary(log: any) {
+  const metadata = log.metadata || {}
+  const eventType = String(log.eventType || '')
+  const base = String(log.summary || 'Ação registrada.')
+
+  if (eventType === 'call_muted') return `${log.clientName || log.employeeName || 'Participante'} silenciou o microfone.`
+  if (eventType === 'call_unmuted') return `${log.clientName || log.employeeName || 'Participante'} reativou o microfone.`
+  if (eventType === 'call_connection_drop') return 'A ligação teve uma oscilação de conexão.'
+  if (eventType === 'call_reconnected') return 'O sistema tentou reconectar o áudio automaticamente.'
+  if (eventType === 'call_message') return `${log.clientName || log.employeeName || 'Participante'} enviou mensagem no chat da ligação.`
+  if (eventType === 'call_menu_selected') return `Cliente escolheu a opção ${metadata.digit || log.selectedOptionDigit || ''}${metadata.label ? ` (${metadata.label})` : ''}.`
+  if (eventType === 'call_recording_saved') return 'Gravação da ligação salva.'
+  if (eventType === 'call_recording_unavailable') return 'Gravação não ficou disponível nesse navegador.'
+  if (eventType === 'call_ended') return `${base} Duração: ${formatSeconds(metadata.duration)}. Microfone silenciado por ${formatSeconds(metadata.muteDuration)}.`
+  return base
+}
+
 export default function AuditoriaProtocolPage() {
   const params = useParams()
   const protocol = decodeURIComponent(String(params?.protocol || ''))
@@ -64,6 +89,16 @@ export default function AuditoriaProtocolPage() {
   }, [company?.id, protocol])
 
   const overview = useMemo(() => chat || call || null, [chat, call])
+  const displayLogs = useMemo(() => {
+    const seen = new Set<string>()
+    return logs.filter((item) => {
+      const date = toDate(item.createdAt)
+      const key = `${item.eventType}|${cleanSummary(item)}|${Math.floor(date.getTime() / 3000)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [logs])
 
   if (loading) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>
@@ -87,16 +122,14 @@ export default function AuditoriaProtocolPage() {
         <Card className="glass border-border/80">
           <CardHeader><CardTitle>Timeline e ações</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            {logs.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">Nenhum evento auditado encontrado.</div> : logs.map((item) => (
+            {displayLogs.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">Nenhum evento auditado encontrado.</div> : displayLogs.map((item) => (
               <div key={item.id} className="rounded-2xl border border-border bg-card/60 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="font-medium">{item.summary}</p>
-                    <p className="text-xs text-muted-foreground">{toDate(item.createdAt).toLocaleString('pt-BR')}</p>
+                    <p className="font-medium">{cleanSummary(item)}</p>
+                    <p className="text-xs text-muted-foreground">Aconteceu às {toDate(item.createdAt).toLocaleTimeString('pt-BR')} em {toDate(item.createdAt).toLocaleDateString('pt-BR')}</p>
                   </div>
-                  <Badge variant="outline">{item.eventType}</Badge>
                 </div>
-                {item.metadata && Object.keys(item.metadata).length > 0 ? <pre className="mt-3 overflow-x-auto rounded-xl bg-background/80 p-3 text-xs text-muted-foreground">{JSON.stringify(item.metadata, null, 2)}</pre> : null}
               </div>
             ))}
           </CardContent>
@@ -116,6 +149,9 @@ export default function AuditoriaProtocolPage() {
               <p>Opção numérica escolhida na ligação: {call?.selectedOptionDigit ? `${call.selectedOptionDigit} - ${call.selectedOptionLabel || 'sem rótulo'}` : 'não aplicável'}</p>
               <p>Mensagens paralelas na ligação: {call?.callChatMessageCount ?? callMessages.length}</p>
               <p>Arquivos trocados na ligação: {call?.callChatAttachmentCount ?? callMessages.filter((item) => item.fileUrl).length}</p>
+              <p>Tempo total da ligação: {formatSeconds(call?.duration || overview?.duration || 0)}</p>
+              <p>Tempo silenciado: {formatSeconds(call?.muteDuration || call?.muteDurationSeconds || 0)}</p>
+              <p>Status da gravação: {call?.recordingUrl ? 'gravada e disponível' : call?.recordingStatus || 'pendente'}</p>
               {call?.recordingUrl ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-foreground"><PlayCircle className="h-4 w-4 text-primary" /> Gravação da ligação</div>

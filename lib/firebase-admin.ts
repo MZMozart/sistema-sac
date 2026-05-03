@@ -1,6 +1,7 @@
 import { cert, getApps, initializeApp, type ServiceAccount } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
+import { getStorage } from 'firebase-admin/storage'
 import fs from 'fs'
 import path from 'path'
 
@@ -49,14 +50,17 @@ function getServiceAccount(): ServiceAccount | null {
 }
 
 const serviceAccount = getServiceAccount()
+const projectId = (serviceAccount as any)?.projectId || process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.firebasestorage.app` : undefined)
 
 const adminApp = getApps().length
   ? getApps()[0]
   : initializeApp(
       serviceAccount
-        ? { credential: cert(serviceAccount) }
-        : { projectId: process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID }
+        ? { credential: cert(serviceAccount), storageBucket }
+        : { projectId, storageBucket }
     )
 
 export const adminAuth = getAuth(adminApp)
 export const adminDb = getFirestore(adminApp)
+export const adminStorage = getStorage(adminApp)

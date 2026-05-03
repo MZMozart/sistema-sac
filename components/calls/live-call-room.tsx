@@ -61,9 +61,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const localMuteStartedAtRef = useRef<number | null>(null)
   const mutedDurationRef = useRef(0)
   const connectionDropsRef = useRef(0)
+  const recordingFinalizedRef = useRef(false)
 
   const [status, setStatus] = useState<'connecting' | 'waiting' | 'ringing' | 'active' | 'ended'>('connecting')
   const [muted, setMuted] = useState(false)
+  const [mutedElapsed, setMutedElapsed] = useState(0)
   const [duration, setDuration] = useState(0)
   const [loading, setLoading] = useState(true)
   const [initError, setInitError] = useState<string | null>(null)
@@ -125,6 +127,8 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const playRemoteAudio = async () => {
     if (!remoteAudioRef.current) return
     try {
+      remoteAudioRef.current.muted = false
+      remoteAudioRef.current.volume = Math.max(0, Math.min(1, (audioSettings?.callVolume ?? 100) / 100))
       await remoteAudioRef.current.play()
       setRemoteNeedsInteraction(false)
     } catch {
@@ -135,9 +139,24 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const uploadRecording = async () => {
     if (!recordedChunksRef.current.length) return null
     const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
-    const fileRef = ref(storage, `calls/${companyId}/${callId}/recording-${Date.now()}.webm`)
-    await uploadBytes(fileRef, blob)
-    const recordingUrl = await getDownloadURL(fileRef)
+    let recordingUrl: string | null = null
+    try {
+      const fileRef = ref(storage, `calls/${companyId}/${callId}/recording-${Date.now()}.webm`)
+      await uploadBytes(fileRef, blob)
+      recordingUrl = await getDownloadURL(fileRef)
+    } catch {
+      const formData = new FormData()
+      formData.append('file', blob, `recording-${callId}.webm`)
+      formData.append('companyId', companyId)
+      formData.append('callId', callId)
+      formData.append('protocol', auditProtocol)
+      const response = await fetch('/api/calls/recording', { method: 'POST', body: formData })
+      if (response.ok) {
+        const payload = await response.json()
+        recordingUrl = payload.recordingUrl || null
+      }
+    }
+    if (!recordingUrl) return null
     await createAuditLog({
       companyId,
       companyName,
@@ -155,6 +174,8 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   }
 
   const stopRecorderAndUpload = async () => {
+    if (recordingFinalizedRef.current) return null
+    recordingFinalizedRef.current = true
     const recorder = mediaRecorderRef.current
     if (!recorder) {
       await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_started', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
@@ -206,6 +227,37 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       if (timer) clearInterval(timer)
     }
   }, [status])
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null
+    if (muted && localMuteStartedAtRef.current) {
+      timer = setInterval(() => {
+        setMutedElapsed(Math.round((Date.now() - (localMuteStartedAtRef.current || Date.now())) / 1000))
+      }, 1000)
+    } else {
+      setMutedElapsed(0)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [muted])
+
+  useEffect(() => {
+    if (status !== 'ended') return
+    stopRecorderAndUpload().catch(() => null)
+  }, [status])
+
+  useEffect(() => {
+    if (!remoteAudioReady) return
+    const resume = () => playRemoteAudio().catch(() => null)
+    window.addEventListener('pointerdown', resume, { once: true })
+    window.addEventListener('keydown', resume, { once: true })
+    playRemoteAudio().catch(() => null)
+    return () => {
+      window.removeEventListener('pointerdown', resume)
+      window.removeEventListener('keydown', resume)
+    }
+  }, [remoteAudioReady])
 
   const formattedDuration = useMemo(() => `${String(Math.floor(duration / 60)).padStart(2, '0')}:${String(duration % 60).padStart(2, '0')}`, [duration])
   const dialpadKeys = [
@@ -675,7 +727,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       <div className="flex flex-wrap gap-3" data-testid="live-call-desktop-controls">
         <Button variant="outline" onClick={toggleMute} data-testid="live-call-mute-button">
           {muted ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
-          {muted ? 'Desmutar' : 'Mutar'}
+          {muted ? `Desmutar (${mutedElapsed}s)` : 'Mutar'}
         </Button>
         <Button variant="destructive" onClick={endCall} data-testid="live-call-end-button">
           <PhoneOff className="mr-2 h-4 w-4" />
@@ -773,7 +825,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           </Button>
           <Button variant="ghost" className="h-14 flex-col gap-1 rounded-2xl bg-white/10 px-2 text-[10px] text-white hover:bg-white/15 hover:text-white" onClick={toggleMute} data-testid="live-call-mobile-mute-button">
             {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-            {muted ? 'Som' : 'Mute'}
+            {muted ? `${mutedElapsed}s` : 'Mute'}
           </Button>
         </div>
       </div>
