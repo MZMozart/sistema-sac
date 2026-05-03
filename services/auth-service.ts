@@ -224,9 +224,13 @@ export class AuthService {
     }
   }
 
-  static async signIn(email: string, password: string): Promise<FirebaseUser> {
+  static async signIn(email: string, password: string, keepSignedIn = false): Promise<FirebaseUser> {
     try {
-      await this.ensureTabScopedSession()
+      if (keepSignedIn) {
+        await this.ensureDeviceScopedSession()
+      } else {
+        await this.ensureTabScopedSession()
+      }
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
       return userCredential.user
     } catch (error) {

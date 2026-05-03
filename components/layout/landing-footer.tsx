@@ -1,10 +1,18 @@
 import Link from 'next/link'
-import { Download, MonitorDown, Smartphone } from 'lucide-react'
+import { Download, MonitorDown } from 'lucide-react'
 import { Logo } from '@/components/logo'
 import { Button } from '@/components/ui/button'
 
 const WINDOWS_DOWNLOAD_URL = 'https://github.com/MZMozart/sistema-sac/releases/latest/download/AtendePro-0.1.0-win-x64.exe'
 const ANDROID_DOWNLOAD_URL = 'https://github.com/MZMozart/sistema-sac/releases/latest/download/AtendePro-Android-debug.apk'
+
+function AndroidMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path fill="currentColor" d="M7.2 8.1 5.7 5.5a.7.7 0 0 1 1.2-.7l1.6 2.8a8.2 8.2 0 0 1 7 0l1.6-2.8a.7.7 0 0 1 1.2.7l-1.5 2.6A7.7 7.7 0 0 1 20 14v5.2c0 .9-.7 1.6-1.6 1.6H5.6c-.9 0-1.6-.7-1.6-1.6V14c0-2.4 1.2-4.5 3.2-5.9ZM8 13.2a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm8 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" />
+    </svg>
+  )
+}
 
 export function LandingFooter() {
   return (
@@ -19,14 +27,14 @@ export function LandingFooter() {
             <Button asChild className="h-11 justify-center gap-2">
               <a href={WINDOWS_DOWNLOAD_URL} download>
                 <MonitorDown className="h-4 w-4" />
-                Baixar para PC
+                Download para desktop
                 <Download className="h-4 w-4" />
               </a>
             </Button>
             <Button asChild variant="outline" className="h-11 justify-center gap-2">
               <a href={ANDROID_DOWNLOAD_URL} download>
-                <Smartphone className="h-4 w-4" />
-                Baixar Android
+                <AndroidMark />
+                Download para Android
                 <Download className="h-4 w-4" />
               </a>
             </Button>

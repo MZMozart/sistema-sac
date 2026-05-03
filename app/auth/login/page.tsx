@@ -8,6 +8,7 @@ import { Logo } from '@/components/logo'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { firebaseEnvReady } from '@/lib/firebase'
 import { toast } from 'sonner'
@@ -22,6 +23,7 @@ export default function LoginPage() {
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [twoFactorRequired, setTwoFactorRequired] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [keepSignedIn, setKeepSignedIn] = useState(true)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export default function LoginPage() {
 
     setLoading(true)
     try {
-      const result = await signIn(email, password)
+      const result = await signIn(email, password, keepSignedIn)
       if ((result as any)?.requiresTwoFactor) {
         setTwoFactorRequired(true)
         toast.success('Senha validada. Agora informe o código do autenticador.')
@@ -293,6 +295,20 @@ export default function LoginPage() {
                     </button>
                   </div>
                 </div>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-secondary/30 p-3 text-sm" htmlFor="keep-signed-in">
+                  <Checkbox
+                    id="keep-signed-in"
+                    checked={keepSignedIn}
+                    onCheckedChange={(value) => setKeepSignedIn(Boolean(value))}
+                    disabled={loading}
+                    data-testid="login-keep-signed-in-checkbox"
+                  />
+                  <span>
+                    <span className="block font-medium">Manter logado</span>
+                    <span className="block text-xs text-muted-foreground">Ao fechar e abrir o app novamente, sua sessão continua ativa até você clicar em sair.</span>
+                  </span>
+                </label>
 
                 <Button
                   type="submit"

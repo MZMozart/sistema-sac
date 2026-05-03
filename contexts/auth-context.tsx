@@ -16,7 +16,7 @@ interface AuthContextType {
   company: Company | null
   employee: Employee | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ requiresTwoFactor?: boolean } | void>
+  signIn: (email: string, password: string, keepSignedIn?: boolean) => Promise<{ requiresTwoFactor?: boolean } | void>
   signUp: (email: string, password: string, type: AccountType, data: Partial<User>) => Promise<void>
   signInWithGoogle: (type?: AccountType) => Promise<{ requiresTwoFactor?: boolean } | void>
   signInWithApple: (type?: AccountType) => Promise<void>
@@ -186,10 +186,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string, keepSignedIn = false) => {
     setLoading(true)
     try {
-      const firebaseUser = await AuthService.signIn(email, password)
+      const firebaseUser = await AuthService.signIn(email, password, keepSignedIn)
       const data = await fetchUserData(firebaseUser)
       const type = getUserType(data, employee)
 
