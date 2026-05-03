@@ -17,17 +17,36 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const bucket = adminStorage.bucket()
+    const bucketNames = Array.from(new Set([
+      process.env.FIREBASE_STORAGE_BUCKET,
+      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? `${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}.appspot.com` : null,
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? `${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}.firebasestorage.app` : null,
+    ].filter(Boolean) as string[]))
     const path = `calls/${companyId}/${callId}/recording-${Date.now()}.webm`
-    const destination = bucket.file(path)
+    let bucket = bucketNames.length > 0 ? adminStorage.bucket(bucketNames[0]) : adminStorage.bucket()
+    let destination = bucket.file(path)
+    let lastUploadError: any = null
 
-    await destination.save(buffer, {
-      contentType: file.type || 'audio/webm',
-      resumable: false,
-      metadata: {
-        cacheControl: 'private, max-age=31536000',
-      },
-    })
+    for (const bucketName of bucketNames.length > 0 ? bucketNames : [undefined]) {
+      bucket = bucketName ? adminStorage.bucket(bucketName) : adminStorage.bucket()
+      destination = bucket.file(path)
+      try {
+        await destination.save(buffer, {
+          contentType: file.type || 'audio/webm',
+          resumable: false,
+          metadata: {
+            cacheControl: 'private, max-age=31536000',
+          },
+        })
+        lastUploadError = null
+        break
+      } catch (uploadError: any) {
+        lastUploadError = uploadError
+      }
+    }
+
+    if (lastUploadError) throw lastUploadError
 
     const [signedUrl] = await destination.getSignedUrl({
       action: 'read',

@@ -68,7 +68,7 @@ function getServiceAccount(): ServiceAccount | null {
 
 const serviceAccount = getServiceAccount()
 const projectId = (serviceAccount as any)?.projectId || process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.firebasestorage.app` : undefined)
+const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.appspot.com` : undefined)
 
 const adminApp = getApps().length
   ? getApps()[0]

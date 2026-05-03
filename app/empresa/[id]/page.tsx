@@ -238,6 +238,23 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
 
     setStartingCall(true)
     try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+        try {
+          const permissionStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
+          permissionStream.getTracks().forEach((track) => track.stop())
+        } catch {
+          toast.error('Permita o microfone para iniciar a ligação.')
+          setStartingCall(false)
+          return
+        }
+      }
+
       const callRef = doc(collection(db, 'call_sessions'))
       const callId = callRef.id
       const protocolo = generateProtocol('CAL')
