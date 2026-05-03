@@ -6,6 +6,7 @@ import { Bell, Loader2, MailCheck, Save, ShieldCheck, Smartphone, UserRound } fr
 import { useAuth } from '@/contexts/auth-context'
 import { AuthService } from '@/services/auth-service'
 import { db } from '@/lib/firebase'
+import { composeAddress, lookupCepAddress, normalizeCep } from '@/lib/cep'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ export default function ClienteConfiguracoesPage() {
   const [loading, setLoading] = useState(false)
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null)
   const [smsCode, setSmsCode] = useState('')
+  const lastCepLookupRef = useRef('')
 
   const [profile, setProfile] = useState({
     name: userData?.name || userData?.fullName || '',
@@ -35,6 +37,11 @@ export default function ClienteConfiguracoesPage() {
     gender: (userData?.gender as ClientGender) || 'prefiro-nao-informar',
     cep: userData?.cep || '',
     address: userData?.address || '',
+    addressNumber: (userData as any)?.addressNumber || '',
+    addressComplement: (userData as any)?.addressComplement || '',
+    neighborhood: (userData as any)?.neighborhood || '',
+    city: userData?.city || '',
+    state: userData?.state || '',
     preferredContactChannel: (userData?.preferredContactChannel as ClientChannel) || 'chat',
   })
 
@@ -60,6 +67,11 @@ export default function ClienteConfiguracoesPage() {
       gender: (userData.gender as ClientGender) || 'prefiro-nao-informar',
       cep: userData.cep || '',
       address: userData.address || '',
+      addressNumber: (userData as any).addressNumber || '',
+      addressComplement: (userData as any).addressComplement || '',
+      neighborhood: (userData as any).neighborhood || '',
+      city: userData.city || '',
+      state: userData.state || '',
       preferredContactChannel: (userData.preferredContactChannel as ClientChannel) || 'chat',
     })
     setNotifications({
@@ -71,9 +83,36 @@ export default function ClienteConfiguracoesPage() {
   }, [userData])
 
   const completion = useMemo(() => {
-    const required = [profile.name, profile.email, profile.phone, profile.address]
+    const required = [profile.name, profile.email, profile.phone, profile.cep, profile.address, profile.addressNumber]
     return Math.round((required.filter(Boolean).length / required.length) * 100)
   }, [profile])
+
+  const lookupCep = async (silent = false) => {
+    const cep = normalizeCep(profile.cep)
+    if (cep.length !== 8) return
+
+    try {
+      const data = await lookupCepAddress(cep)
+      setProfile((current) => ({
+        ...current,
+        cep,
+        address: data.street || current.address,
+        neighborhood: data.neighborhood || current.neighborhood,
+        city: data.city || current.city,
+        state: data.state || current.state,
+      }))
+      if (!silent) toast.success('CEP preenchido automaticamente.')
+    } catch {
+      if (!silent) toast.error('Não consegui preencher o CEP automaticamente.')
+    }
+  }
+
+  useEffect(() => {
+    const cep = normalizeCep(profile.cep)
+    if (cep.length !== 8 || cep === lastCepLookupRef.current) return
+    lastCepLookupRef.current = cep
+    lookupCep(true)
+  }, [profile.cep])
 
   if (!userData) {
     return (
@@ -98,8 +137,20 @@ export default function ClienteConfiguracoesPage() {
         phone: profile.fullPhone || profile.phone || '',
         gender: profile.gender || 'prefiro-nao-informar',
         cep: profile.cep || '',
-        address: profile.address || '',
+        address: composeAddress({
+          street: profile.address,
+          number: profile.addressNumber,
+          complement: profile.addressComplement,
+          neighborhood: profile.neighborhood,
+          city: profile.city,
+          state: profile.state,
+        }),
+        addressNumber: profile.addressNumber || '',
+        addressComplement: profile.addressComplement || '',
+        neighborhood: profile.neighborhood || '',
         preferredContactChannel: profile.preferredContactChannel || 'chat',
+        city: profile.city || '',
+        state: profile.state || '',
       }
 
       let emailChangeBlocked = false
@@ -346,7 +397,7 @@ export default function ClienteConfiguracoesPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>CEP</Label>
-                  <Input value={profile.cep} onChange={(event) => setProfile((current) => ({ ...current, cep: event.target.value.replace(/\D/g, '') }))} data-testid="client-settings-cep-input" />
+                  <Input value={profile.cep} onChange={(event) => setProfile((current) => ({ ...current, cep: normalizeCep(event.target.value) }))} data-testid="client-settings-cep-input" maxLength={8} />
                 </div>
                 <div className="space-y-2">
                   <Label>Canal preferido</Label>
@@ -361,7 +412,23 @@ export default function ClienteConfiguracoesPage() {
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label>Endereço</Label>
-                  <Input value={profile.address} onChange={(event) => setProfile((current) => ({ ...current, address: event.target.value }))} data-testid="client-settings-address-input" />
+                  <Input value={profile.address} readOnly className="bg-secondary/30" data-testid="client-settings-address-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Número</Label>
+                  <Input value={profile.addressNumber} onChange={(event) => setProfile((current) => ({ ...current, addressNumber: event.target.value }))} data-testid="client-settings-address-number-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Complemento</Label>
+                  <Input value={profile.addressComplement} onChange={(event) => setProfile((current) => ({ ...current, addressComplement: event.target.value }))} data-testid="client-settings-address-complement-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Bairro</Label>
+                  <Input value={profile.neighborhood} readOnly className="bg-secondary/30" data-testid="client-settings-neighborhood-input" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cidade / UF</Label>
+                  <Input value={[profile.city, profile.state].filter(Boolean).join(' - ')} readOnly className="bg-secondary/30" data-testid="client-settings-city-input" />
                 </div>
                 <Button onClick={saveProfile} disabled={loading} className="bg-gradient-primary md:col-span-2" data-testid="client-settings-save-profile-button">
                   {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

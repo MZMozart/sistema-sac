@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Building2, CheckCircle2, Loader2, Mail, Search, ShieldCheck, UserRound } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { firebaseEnvReady } from "@/lib/firebase";
+import { lookupCepAddress, normalizeCep } from "@/lib/cep";
 import { toast } from "sonner";
 
 type RegisterType = "pf" | "pj";
@@ -89,6 +90,7 @@ export default function RegisterPage() {
   });
   const [cpfStatus, setCpfStatus] = useState<"idle" | "valid" | "invalid">("idle");
   const [autoFillLoading, setAutoFillLoading] = useState(false);
+  const lastCepLookupRef = useRef("");
 
   const steps = useMemo(
     () => (accountType === "pj" ? ["tipo", "credenciais", "empresa", "operacao"] : ["tipo", "credenciais", "perfil", "confirmacao"]),
@@ -150,31 +152,36 @@ export default function RegisterPage() {
     }
   };
 
-  const handleCepLookup = async () => {
-    const cep = formData.cep.replace(/\D/g, "");
+  const handleCepLookup = async (silent = false) => {
+    const cep = normalizeCep(formData.cep);
     if (cep.length !== 8) return;
 
     setAutoFillLoading(true);
     try {
-      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-      const data = await response.json();
-      if (data.erro) throw new Error();
+      const data = await lookupCepAddress(cep);
 
       setFormData((prev) => ({
         ...prev,
         cep,
-        address: data.logradouro || prev.address,
-        neighborhood: data.bairro || prev.neighborhood,
-        city: data.localidade || prev.city,
-        state: data.uf || prev.state,
+        address: data.street || prev.address,
+        neighborhood: data.neighborhood || prev.neighborhood,
+        city: data.city || prev.city,
+        state: data.state || prev.state,
       }));
-      toast.success("CEP preenchido automaticamente.");
+      if (!silent) toast.success("CEP preenchido automaticamente.");
     } catch {
-      toast.error("Não consegui preencher o CEP automaticamente.");
+      if (!silent) toast.error("Não consegui preencher o CEP automaticamente.");
     } finally {
       setAutoFillLoading(false);
     }
   };
+
+  useEffect(() => {
+    const cep = normalizeCep(formData.cep);
+    if (cep.length !== 8 || cep === lastCepLookupRef.current) return;
+    lastCepLookupRef.current = cep;
+    handleCepLookup(true);
+  }, [formData.cep]);
 
   const handleCnpjLookup = async () => {
     const cnpj = formData.cnpj.replace(/\D/g, "");
@@ -192,7 +199,7 @@ export default function RegisterPage() {
         nomeFantasia: data.fantasia || prev.nomeFantasia,
         phone: prev.phone || (data.telefone ? String(data.telefone).replace(/\D/g, "") : ""),
         cep: data.cep ? String(data.cep).replace(/\D/g, "") : prev.cep,
-        address: [data.logradouro, data.numero].filter(Boolean).join(", ") || prev.address,
+        address: data.logradouro || prev.address,
         addressNumber: data.numero ? String(data.numero) : prev.addressNumber,
         addressComplement: data.complemento || prev.addressComplement,
         neighborhood: data.bairro || prev.neighborhood,
@@ -452,7 +459,7 @@ export default function RegisterPage() {
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-cep">CEP</Label>
         <div className="flex gap-2">
-          <Input id="register-cep" data-testid="register-cep-input" placeholder="00000-000" value={formData.cep} onChange={(event) => updateField("cep", event.target.value.replace(/\D/g, ""))} className="h-12" maxLength={8} />
+          <Input id="register-cep" data-testid="register-cep-input" placeholder="00000-000" value={formData.cep} onChange={(event) => updateField("cep", normalizeCep(event.target.value))} className="h-12" maxLength={8} />
           <Button type="button" variant="outline" onClick={handleCepLookup} disabled={autoFillLoading} data-testid="register-cep-lookup-button">
             {autoFillLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           </Button>
@@ -460,7 +467,7 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-address">Endereço</Label>
-        <Input id="register-address" data-testid="register-address-input" placeholder="Rua / avenida" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+        <Input id="register-address" data-testid="register-address-input" placeholder="Rua / avenida" value={formData.address} readOnly className="h-12 bg-secondary/30" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-address-number">Número</Label>
@@ -472,11 +479,11 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-neighborhood">Bairro</Label>
-        <Input id="register-neighborhood" data-testid="register-neighborhood-input" placeholder="Bairro" value={formData.neighborhood} onChange={(event) => updateField("neighborhood", event.target.value)} className="h-12" />
+        <Input id="register-neighborhood" data-testid="register-neighborhood-input" placeholder="Bairro" value={formData.neighborhood} readOnly className="h-12 bg-secondary/30" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-city">Cidade / UF</Label>
-        <Input id="register-city" data-testid="register-city-input" placeholder="Cidade - UF" value={[formData.city, formData.state].filter(Boolean).join(' - ')} onChange={(event) => updateField("city", event.target.value)} className="h-12" />
+        <Input id="register-city" data-testid="register-city-input" placeholder="Cidade - UF" value={[formData.city, formData.state].filter(Boolean).join(' - ')} readOnly className="h-12 bg-secondary/30" />
       </div>
     </div>
   );
@@ -528,7 +535,7 @@ export default function RegisterPage() {
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-company-cep">CEP</Label>
         <div className="flex gap-2">
-          <Input id="register-company-cep" data-testid="register-company-cep-input" placeholder="00000-000" value={formData.cep} onChange={(event) => updateField("cep", event.target.value.replace(/\D/g, ""))} className="h-12" maxLength={8} />
+          <Input id="register-company-cep" data-testid="register-company-cep-input" placeholder="00000-000" value={formData.cep} onChange={(event) => updateField("cep", normalizeCep(event.target.value))} className="h-12" maxLength={8} />
           <Button type="button" variant="outline" onClick={handleCepLookup} disabled={autoFillLoading} data-testid="register-company-cep-lookup-button">
             {autoFillLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           </Button>
@@ -536,7 +543,7 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-company-address">Endereço</Label>
-        <Input id="register-company-address" data-testid="register-company-address-input" placeholder="Rua / avenida" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+        <Input id="register-company-address" data-testid="register-company-address-input" placeholder="Rua / avenida" value={formData.address} readOnly className="h-12 bg-secondary/30" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-company-address-number">Número</Label>
@@ -548,11 +555,11 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-company-neighborhood">Bairro</Label>
-        <Input id="register-company-neighborhood" data-testid="register-company-neighborhood-input" placeholder="Bairro" value={formData.neighborhood} onChange={(event) => updateField("neighborhood", event.target.value)} className="h-12" />
+        <Input id="register-company-neighborhood" data-testid="register-company-neighborhood-input" placeholder="Bairro" value={formData.neighborhood} readOnly className="h-12 bg-secondary/30" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-company-city">Cidade / UF</Label>
-        <Input id="register-company-city" data-testid="register-company-city-input" placeholder="Cidade - UF" value={[formData.city, formData.state].filter(Boolean).join(' - ')} onChange={(event) => updateField("city", event.target.value)} className="h-12" />
+        <Input id="register-company-city" data-testid="register-company-city-input" placeholder="Cidade - UF" value={[formData.city, formData.state].filter(Boolean).join(' - ')} readOnly className="h-12 bg-secondary/30" />
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-website">Website</Label>

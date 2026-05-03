@@ -1,11 +1,12 @@
 'use client'
 
-import { ChangeEvent, useEffect, useState } from 'react'
+import { ChangeEvent, useEffect, useRef, useState } from 'react'
 import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/contexts/auth-context'
 import { AuthService } from '@/services/auth-service'
 import { createNotification } from '@/lib/notifications'
+import { composeAddress, lookupCepAddress, normalizeCep } from '@/lib/cep'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,6 +78,8 @@ export default function SettingsPage() {
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingBanner, setUploadingBanner] = useState(false)
   const [lookingUpCnpj, setLookingUpCnpj] = useState(false)
+  const [lookingUpCep, setLookingUpCep] = useState(false)
+  const lastCompanyCepLookupRef = useRef('')
 
   const [companyData, setCompanyData] = useState({
     ownerFullName: userData?.fullName || userData?.name || '',
@@ -93,6 +96,11 @@ export default function SettingsPage() {
     cep: company?.cep || '',
     segmento: company?.segmento || '',
     address: company?.address || '',
+    addressNumber: companyAny?.addressNumber || '',
+    addressComplement: companyAny?.addressComplement || '',
+    neighborhood: companyAny?.neighborhood || '',
+    city: companyAny?.city || '',
+    state: companyAny?.state || '',
   })
 
   const [schedule, setSchedule] = useState({
@@ -200,6 +208,11 @@ export default function SettingsPage() {
       cep: company?.cep || '',
       segmento: company?.segmento || '',
       address: company?.address || '',
+      addressNumber: companyAny?.addressNumber || '',
+      addressComplement: companyAny?.addressComplement || '',
+      neighborhood: companyAny?.neighborhood || '',
+      city: companyAny?.city || '',
+      state: companyAny?.state || '',
     })
 
     setSchedule({
@@ -369,7 +382,7 @@ export default function SettingsPage() {
         email: data.email || current.email,
         phone: data.phone || current.phone,
         cep: data.cep || current.cep,
-        address: data.address || current.address,
+        address: data.address?.split(',')[0] || current.address,
         segmento: data.segmento || current.segmento,
       }))
 
@@ -380,6 +393,36 @@ export default function SettingsPage() {
       setLookingUpCnpj(false)
     }
   }
+
+  const handleLookupCompanyCep = async (silent = false) => {
+    const cep = normalizeCep(companyData.cep)
+    if (cep.length !== 8) return
+
+    setLookingUpCep(true)
+    try {
+      const data = await lookupCepAddress(cep)
+      setCompanyData((current) => ({
+        ...current,
+        cep,
+        address: data.street || current.address,
+        neighborhood: data.neighborhood || current.neighborhood,
+        city: data.city || current.city,
+        state: data.state || current.state,
+      }))
+      if (!silent) toast.success('CEP preenchido automaticamente.')
+    } catch {
+      if (!silent) toast.error('Não consegui preencher o CEP automaticamente.')
+    } finally {
+      setLookingUpCep(false)
+    }
+  }
+
+  useEffect(() => {
+    const cep = normalizeCep(companyData.cep)
+    if (cep.length !== 8 || cep === lastCompanyCepLookupRef.current) return
+    lastCompanyCepLookupRef.current = cep
+    handleLookupCompanyCep(true)
+  }, [companyData.cep])
 
   const handleSave = async () => {
     setLoading(true)
@@ -412,7 +455,19 @@ export default function SettingsPage() {
             linkedin: companyData.linkedin,
             cep: companyData.cep,
             segmento: companyData.segmento,
-            address: companyData.address,
+            address: composeAddress({
+              street: companyData.address,
+              number: companyData.addressNumber,
+              complement: companyData.addressComplement,
+              neighborhood: companyData.neighborhood,
+              city: companyData.city,
+              state: companyData.state,
+            }),
+            addressNumber: companyData.addressNumber,
+            addressComplement: companyData.addressComplement,
+            neighborhood: companyData.neighborhood,
+            city: companyData.city,
+            state: companyData.state,
             horarioInicio: schedule.horarioInicio,
             horarioFim: schedule.horarioFim,
             horarioAlmocoInicio: schedule.horarioAlmocoInicio,
@@ -719,11 +774,17 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>CEP</Label>
-                  <Input
-                    value={companyData.cep}
-                    onChange={(e) => setCompanyData({ ...companyData, cep: e.target.value })}
-                    placeholder="00000-000"
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      value={companyData.cep}
+                      onChange={(e) => setCompanyData({ ...companyData, cep: normalizeCep(e.target.value) })}
+                      placeholder="00000-000"
+                      maxLength={8}
+                    />
+                    <Button type="button" variant="outline" onClick={() => handleLookupCompanyCep(false)} disabled={lookingUpCep}>
+                      {lookingUpCep ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Segmento</Label>
@@ -780,9 +841,28 @@ export default function SettingsPage() {
                 </Label>
                 <Input
                   value={companyData.address}
-                  onChange={(e) => setCompanyData({ ...companyData, address: e.target.value })}
-                  placeholder="Rua, número, cidade - estado"
+                  readOnly
+                  className="bg-secondary/30"
+                  placeholder="Rua / avenida"
                 />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Número</Label>
+                  <Input value={companyData.addressNumber} onChange={(e) => setCompanyData({ ...companyData, addressNumber: e.target.value })} placeholder="Número" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Complemento</Label>
+                  <Input value={companyData.addressComplement} onChange={(e) => setCompanyData({ ...companyData, addressComplement: e.target.value })} placeholder="Sala, loja, bloco" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Bairro</Label>
+                  <Input value={companyData.neighborhood} readOnly className="bg-secondary/30" placeholder="Bairro" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cidade / UF</Label>
+                  <Input value={[companyData.city, companyData.state].filter(Boolean).join(' - ')} readOnly className="bg-secondary/30" placeholder="Cidade - UF" />
+                </div>
               </div>
             </CardContent>
           </Card>

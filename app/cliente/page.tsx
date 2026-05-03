@@ -42,18 +42,33 @@ export default function ClientePage() {
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
-        const companiesQuery = query(
-          collection(db, 'companies'),
-          limit(20)
-        )
-        const snapshot = await getDocs(companiesQuery)
+        const companiesQuery = query(collection(db, 'companies'), limit(20))
+        const [snapshot, ratingsSnapshot] = await Promise.all([
+          getDocs(companiesQuery),
+          getDocs(collection(db, 'ratings')),
+        ])
+        const ratingsByCompany = ratingsSnapshot.docs.reduce((acc: Record<string, { total: number; sum: number }>, item) => {
+          const data = item.data() as any
+          const companyId = data.companyId
+          const rating = Number(data.rating || data.nota || 0)
+          if (!companyId || !rating) return acc
+          acc[companyId] = acc[companyId] || { total: 0, sum: 0 }
+          acc[companyId].total += 1
+          acc[companyId].sum += rating
+          return acc
+        }, {})
         const companiesData = snapshot.docs
           .map(doc => ({
             id: doc.id,
             ...doc.data()
           }))
           .filter((company: any) => isPublicCompany(company)) as Company[]
-        setCompanies(companiesData)
+        setCompanies(companiesData.map((company: any) => {
+          const ratingData = ratingsByCompany[company.id]
+          return ratingData
+            ? { ...company, rating: ratingData.sum / ratingData.total, totalReviews: ratingData.total, totalAvaliacoes: ratingData.total }
+            : company
+        }))
       } catch (error) {
         console.error('Error fetching companies:', error)
       }
@@ -239,7 +254,7 @@ export default function ClientePage() {
                       <div className="flex items-center justify-between pt-2 border-t border-border">
                         <div className="flex items-center gap-1 text-sm text-muted-foreground">
                           <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-                          <span>{company.rating?.toFixed(1) || '5.0'}</span>
+                          <span>{Number(company.rating || company.avaliacaoMedia || 0).toFixed(1)} ({Number(company.totalReviews || company.totalAvaliacoes || 0)})</span>
                         </div>
                         <Button size="sm" className="h-8 gap-1" data-testid={`client-company-chat-button-${company.id}`}>
                           <MessageCircle className="w-4 h-4" />

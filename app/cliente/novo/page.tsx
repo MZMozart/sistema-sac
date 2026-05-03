@@ -16,10 +16,29 @@ export default function NewTicketPage() {
   useEffect(() => {
     const loadCompanies = async () => {
       try {
-        const snapshot = await getDocs(collection(db, 'companies'))
-        const rows = snapshot.docs
+        const [companiesSnapshot, ratingsSnapshot] = await Promise.all([
+          getDocs(collection(db, 'companies')),
+          getDocs(collection(db, 'ratings')),
+        ])
+        const ratingsByCompany = ratingsSnapshot.docs.reduce((acc: Record<string, { total: number; sum: number }>, item) => {
+          const data = item.data() as any
+          const companyId = data.companyId
+          const rating = Number(data.rating || data.nota || 0)
+          if (!companyId || !rating) return acc
+          acc[companyId] = acc[companyId] || { total: 0, sum: 0 }
+          acc[companyId].total += 1
+          acc[companyId].sum += rating
+          return acc
+        }, {})
+        const rows = companiesSnapshot.docs
           .map((item: any) => ({ id: item.id, ...item.data() }))
           .filter((item: any) => isPublicCompany(item))
+          .map((item: any) => {
+            const ratingData = ratingsByCompany[item.id]
+            return ratingData
+              ? { ...item, avaliacaoMedia: ratingData.sum / ratingData.total, totalAvaliacoes: ratingData.total }
+              : item
+          })
           .sort((a: any, b: any) => String(a.nomeFantasia || a.razaoSocial || '').localeCompare(String(b.nomeFantasia || b.razaoSocial || '')))
         setCompanies(rows)
       } finally {
@@ -92,7 +111,7 @@ export default function NewTicketPage() {
             </div>
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <Star className="h-3.5 w-3.5 text-primary" />
-              <span>{Number(company.avaliacaoMedia || company.rating || 0).toFixed(1)} de avaliação</span>
+              <span>{Number(company.avaliacaoMedia || company.rating || 0).toFixed(1)} ({Number(company.totalAvaliacoes || company.totalReviews || 0)} avaliações)</span>
             </div>
           </Link>
         ))}
