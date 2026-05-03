@@ -1,43 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { AlertTriangle, BadgeCheck, CreditCard, ShieldCheck, Sparkles, TrendingUp } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, BadgeCheck, Landmark, QrCode, ReceiptText, ShieldCheck, Sparkles, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-
-function detectCardBrand(cardNumber: string) {
-  const clean = cardNumber.replace(/\D/g, '')
-  if (/^4/.test(clean)) return 'Visa'
-  if (/^(5[1-5]|2[2-7])/.test(clean)) return 'Mastercard'
-  if (/^3[47]/.test(clean)) return 'American Express'
-  if (/^6(?:011|5)/.test(clean)) return 'Discover'
-  if (/^(5067|509|650|651|655)/.test(clean)) return 'Elo'
-  if (/^(636368|438935|504175|451416|636297)/.test(clean)) return 'Hipercard'
-  return 'Cartão'
-}
-
-function formatCardNumber(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 16)
-  return digits.replace(/(.{4})/g, '$1 ').trim()
-}
-
-function formatExpiry(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 4)
-  if (digits.length <= 2) return digits
-  return `${digits.slice(0, 2)}/${digits.slice(2)}`
-}
-
-function formatCvv(value: string) {
-  return value.replace(/\D/g, '').slice(0, 3)
-}
-
-function formatHolderName(value: string) {
-  return value.slice(0, 25).toUpperCase()
-}
 
 async function parseResponseSafely(response: Response) {
   const text = await response.text()
@@ -55,16 +25,9 @@ export default function VerifiedPlanPage() {
   const [loading, setLoading] = useState(false)
   const [checkingSession, setCheckingSession] = useState(false)
   const [openingPortal, setOpeningPortal] = useState(false)
-  const [cardForm, setCardForm] = useState({
-    holderName: company?.nomeFantasia || '',
-    cardNumber: '',
-    expiry: '',
-    cvv: '',
-  })
 
   const sessionId = searchParams.get('session_id')
   const cancelled = searchParams.get('cancelled')
-  const cardBrand = useMemo(() => detectCardBrand(cardForm.cardNumber), [cardForm.cardNumber])
 
   useEffect(() => {
     if (!sessionId || !user) return
@@ -193,7 +156,7 @@ export default function VerifiedPlanPage() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+    <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
       <Card className="glass border-border/80">
         <CardHeader>
           <Badge className="w-fit bg-primary/10 text-primary">Plano exclusivo para empresas</Badge>
@@ -230,7 +193,8 @@ export default function VerifiedPlanPage() {
           </div>
 
           <Button onClick={startCheckout} disabled={loading} className="w-full bg-gradient-primary" data-testid="verified-plan-start-checkout-button">
-            {loading ? 'Abrindo pagamento seguro...' : 'Assinar selo verificado'}
+            {loading ? 'Abrindo checkout...' : 'Ir para pagamento do selo'}
+            {!loading ? <ArrowUpRight className="ml-2 h-4 w-4" /> : null}
           </Button>
           <p className="text-xs text-muted-foreground">Pagamento seguro pela Kiwify. A ativação do selo acontece automaticamente quando a compra for aprovada.</p>
         </CardContent>
@@ -238,40 +202,56 @@ export default function VerifiedPlanPage() {
 
       <Card className="glass border-border/80">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Pré-visualização do pagamento</CardTitle>
-          <CardDescription>O checkout real acontece na Kiwify, com Pix, boleto e cartão. Esta área é apenas uma simulação visual para apresentação.</CardDescription>
+          <Badge className="w-fit bg-emerald-500/10 text-emerald-400">Checkout brasileiro</Badge>
+          <CardTitle className="text-2xl">Ative o selo em poucos minutos</CardTitle>
+          <CardDescription>O pagamento abre em uma página segura e, após aprovação, o selo aparece automaticamente no perfil público da empresa.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="rounded-3xl bg-slate-950 p-6 text-white shadow-xl">
-            <div className="flex items-center justify-between">
-              <span className="text-sm uppercase tracking-[0.24em] text-white/70">{cardBrand}</span>
-              <Badge className="bg-white/10 text-white">R$ 49/mês</Badge>
+        <CardContent className="space-y-6">
+          <div className="rounded-3xl border border-primary/20 bg-primary/5 p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Plano mensal</p>
+                <p className="mt-1 text-4xl font-bold">R$ 49</p>
+              </div>
+              <Badge className="bg-primary/15 text-primary">Selo premium</Badge>
             </div>
-            <div className="mt-8 text-2xl tracking-[0.3em]">{cardForm.cardNumber || '0000 0000 0000 0000'}</div>
-            <div className="mt-8 flex items-end justify-between gap-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">Nome</p>
-                <p className="mt-1 text-sm font-medium uppercase">{cardForm.holderName || 'SEU NOME'}</p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-border bg-background/70 p-4">
+                <QrCode className="mb-3 h-5 w-5 text-primary" />
+                <p className="text-sm font-medium">Pix</p>
               </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">Validade</p>
-                <p className="mt-1 text-sm font-medium">{cardForm.expiry || '00/00'}</p>
+              <div className="rounded-2xl border border-border bg-background/70 p-4">
+                <ReceiptText className="mb-3 h-5 w-5 text-primary" />
+                <p className="text-sm font-medium">Boleto</p>
               </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">CVV</p>
-                <p className="mt-1 text-sm font-medium">{cardForm.cvv || '000'}</p>
+              <div className="rounded-2xl border border-border bg-background/70 p-4">
+                <Landmark className="mb-3 h-5 w-5 text-primary" />
+                <p className="text-sm font-medium">Cartão</p>
               </div>
             </div>
           </div>
 
-          <div className="space-y-4">
-            <input className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm uppercase" placeholder="NOME NO CARTÃO" value={cardForm.holderName} onChange={(e) => setCardForm((current) => ({ ...current, holderName: formatHolderName(e.target.value) }))} maxLength={25} data-testid="verified-plan-card-holder-input" />
-            <input className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="0000 0000 0000 0000" value={cardForm.cardNumber} onChange={(e) => setCardForm((current) => ({ ...current, cardNumber: formatCardNumber(e.target.value) }))} inputMode="numeric" maxLength={19} data-testid="verified-plan-card-number-input" />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <input className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="00/00" value={cardForm.expiry} onChange={(e) => setCardForm((current) => ({ ...current, expiry: formatExpiry(e.target.value) }))} inputMode="numeric" maxLength={5} data-testid="verified-plan-card-expiry-input" />
-              <input className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="000" value={cardForm.cvv} onChange={(e) => setCardForm((current) => ({ ...current, cvv: formatCvv(e.target.value) }))} inputMode="numeric" maxLength={3} data-testid="verified-plan-card-cvv-input" />
+          <div className="space-y-3">
+            <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4">
+              <BadgeCheck className="mt-0.5 h-5 w-5 text-emerald-400" />
+              <div>
+                <p className="font-medium">Liberação automática</p>
+                <p className="mt-1 text-sm text-muted-foreground">A confirmação da compra atualiza o status da empresa no sistema.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-2xl border border-border bg-card/60 p-4">
+              <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
+              <div>
+                <p className="font-medium">Mais confiança no perfil</p>
+                <p className="mt-1 text-sm text-muted-foreground">O selo reforça a autoridade da empresa nas páginas públicas.</p>
+              </div>
             </div>
           </div>
+
+          <Button onClick={startCheckout} disabled={loading} variant="outline" className="w-full" data-testid="verified-plan-secondary-checkout-button">
+            {loading ? 'Abrindo checkout...' : 'Abrir checkout da Kiwify'}
+            {!loading ? <ArrowUpRight className="ml-2 h-4 w-4" /> : null}
+          </Button>
         </CardContent>
       </Card>
     </div>
