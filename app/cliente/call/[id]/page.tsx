@@ -32,6 +32,7 @@ export default function ClientCallPage() {
   const [mobileKeypadOpen, setMobileKeypadOpen] = useState(false)
   const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
   const spokenRef = useRef(false)
+  const autoStartedRef = useRef(false)
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const dialpadKeys = [
@@ -82,8 +83,8 @@ export default function ClientCallPage() {
     loadExistingRating()
   }, [id, user?.uid])
 
-  const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || '', [company])
-  const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || [], [company])
+  const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || session?.callBotGreeting || '', [company, session?.callBotGreeting])
+  const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || session?.callBotOptions || [], [company, session?.callBotOptions])
   const callBotSpeech = useMemo(() => {
     const intro = callBotGreeting || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
     const optionsText = callBotOptions
@@ -154,6 +155,12 @@ export default function ClientCallPage() {
       await ttsAudioRef.current.play()
     }
   }
+
+  useEffect(() => {
+    if (!session || !user || audioEnabled || autoStartedRef.current) return
+    autoStartedRef.current = true
+    enableAudio()
+  }, [session?.id, user?.uid, company?.id])
 
   useEffect(() => {
     if (!audioEnabled || !callBotSpeech || !session || session.status === 'ended') return
@@ -330,6 +337,9 @@ export default function ClientCallPage() {
           <Button variant="ghost" size="icon" onClick={() => router.back()} data-testid="client-call-back-button">
             <ArrowLeft className="h-5 w-5" />
           </Button>
+          {company?.logoURL || session.companyLogoURL ? (
+            <img src={company?.logoURL || session.companyLogoURL} alt={session.companyName || 'Empresa'} className="h-10 w-10 rounded-xl object-cover" />
+          ) : null}
           <div className="min-w-0">
             <p className="truncate font-semibold">{session.companyName || 'Empresa'}</p>
             <p className="text-xs text-muted-foreground">Status da ligação: {session.status}</p>
@@ -356,6 +366,7 @@ export default function ClientCallPage() {
             protocol={session.protocolo}
             companyId={session.companyId}
             companyName={session.companyName || 'Empresa'}
+            companyLogoUrl={company?.logoURL || session.companyLogoURL || ''}
             currentUserId={user.uid}
             currentUserName={userData?.fullName || user.displayName || 'Cliente'}
             mode="caller"
@@ -372,15 +383,19 @@ export default function ClientCallPage() {
             onOpenMobileChat={() => setMobileCallPanel('chat')}
           />
         ) : (
-          <div className="flex h-full items-center justify-center rounded-[2rem] border border-border bg-card/60 p-6 text-center">
+          <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),_rgba(2,6,23,0.96)_62%)] p-6 text-center text-white">
             <div>
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white">
-                <Phone className="h-7 w-7" />
-              </div>
-              <p className="text-lg font-semibold">Iniciar ligação</p>
-              <p className="mt-2 text-sm text-muted-foreground">Toque para liberar o microfone e ouvir a saudação automática com as opções do teclado.</p>
-              <Button className="mt-4" onClick={enableAudio} data-testid="client-call-enable-audio-button">
-                Iniciar ligação e ouvir opções
+              {company?.logoURL || session.companyLogoURL ? (
+                <img src={company?.logoURL || session.companyLogoURL} alt={session.companyName || 'Empresa'} className="mx-auto mb-5 h-32 w-32 rounded-full object-cover shadow-2xl" />
+              ) : (
+                <div className="mx-auto mb-5 flex h-32 w-32 items-center justify-center rounded-full bg-white/10 text-white shadow-2xl">
+                  <Phone className="h-12 w-12" />
+                </div>
+              )}
+              <p className="text-xl font-semibold">{session.companyName || 'Empresa'}</p>
+              <p className="mt-2 text-sm text-white/65">Preparando áudio e saudação automática...</p>
+              <Button className="mt-4 bg-white text-slate-950 hover:bg-white/90" onClick={enableAudio} data-testid="client-call-enable-audio-button">
+                Permitir microfone
               </Button>
             </div>
           </div>

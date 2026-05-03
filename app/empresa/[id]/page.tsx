@@ -157,6 +157,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         protocolo: generateProtocol('CHT'),
         companyId: company.id,
         companyName: company.nomeFantasia || company.razaoSocial,
+        companyLogoURL: company.logoURL || '',
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
         clientEmail: user.email || '',
@@ -247,6 +248,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         protocolo,
         companyId: company.id,
         companyName: company.nomeFantasia || company.razaoSocial,
+        companyLogoURL: company.logoURL || '',
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
         clientEmail: user.email || '',
@@ -265,6 +267,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         protocolo,
         companyId: company.id,
         companyName: company.nomeFantasia || company.razaoSocial,
+        companyLogoURL: company.logoURL || '',
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
         status: 'waiting',
@@ -333,13 +336,14 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
   const averageRating = reviews.length > 0 ? reviews.reduce((sum, review: any) => sum + Number(review.rating || 0), 0) / reviews.length : Number(company.rating || 5.0)
   const totalReviews = reviews.length || company.totalReviews || 0
   const isOwnCompany = Boolean(userData?.companyId === company?.id)
-  const isCompanyTeamUser = ['owner', 'manager', 'employee', 'attendant', 'admin'].includes(String(userData?.role || ''))
-  const canStartAttendance = !isOwnCompany && !isCompanyTeamUser
+  const isCompanyAccount = userData?.accountType === 'company' || userData?.accountType === 'empresa'
+  const isCompanyTeamUser = Boolean(userData?.companyId) && ['owner', 'manager', 'employee', 'attendant', 'admin'].includes(String(userData?.role || ''))
+  const canStartAttendance = !isOwnCompany && !isCompanyAccount && !isCompanyTeamUser
   const primaryColor = company?.corPrimaria || '#2563eb'
   const accentColor = company?.corDestaque || '#38bdf8'
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-screen flex flex-col bg-background pb-20 sm:pb-0">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 glass-strong border-b border-border">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
@@ -663,6 +667,32 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
             </div>
           </div>
         </div>
+        {canStartAttendance ? (
+          <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-20px_60px_-35px_rgba(15,23,42,0.7)] backdrop-blur sm:hidden" data-testid="public-company-mobile-cta-bar">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={handleStartChat}
+                disabled={startingChat}
+                className="h-10 text-xs"
+                style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
+                data-testid="public-company-mobile-start-chat-button"
+              >
+                {startingChat ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
+                Chat
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleStartCall}
+                disabled={startingCall}
+                className="h-10 text-xs"
+                data-testid="public-company-mobile-start-call-button"
+              >
+                {startingCall ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
+                Ligação
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </main>
     </div>
   )

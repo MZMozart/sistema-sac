@@ -172,9 +172,13 @@ export default function ClientePage() {
                     onClick={() => router.push(`/cliente/chat/${chat.id}`)}
                   >
                     <CardContent className="flex items-center gap-4 p-4">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center">
-                        <Building2 className="w-6 h-6 text-primary-foreground" />
-                      </div>
+                      {(chat as any).companyLogoURL ? (
+                        <img src={(chat as any).companyLogoURL} alt={chat.companyName || 'Empresa'} className="h-12 w-12 rounded-xl object-cover" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center">
+                          <Building2 className="w-6 h-6 text-primary-foreground" />
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <h3 className="font-medium truncate">{chat.companyName || 'Empresa'}</h3>
                         <p className="text-sm text-muted-foreground truncate">

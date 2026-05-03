@@ -97,9 +97,13 @@ export default function NewTicketPage() {
             data-testid={`client-company-showcase-card-${company.id}`}
           >
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <Building2 className="h-5 w-5" />
-              </div>
+              {company.logoURL ? (
+                <img src={company.logoURL} alt={company.nomeFantasia || company.razaoSocial || 'Empresa'} className="h-11 w-11 shrink-0 rounded-2xl object-cover" />
+              ) : (
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Building2 className="h-5 w-5" />
+                </div>
+              )}
               <div className="min-w-0">
                 <p className="truncate font-semibold">{company.nomeFantasia || company.razaoSocial || 'Empresa'}</p>
                 <p className="mt-1 truncate text-sm text-muted-foreground">{company.segmento || 'Atendimento geral'}</p>

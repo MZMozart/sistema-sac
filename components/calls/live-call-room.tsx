@@ -20,6 +20,7 @@ interface LiveCallRoomProps {
   protocol?: string
   companyId: string
   companyName: string
+  companyLogoUrl?: string
   currentUserId: string
   currentUserName: string
   mode: CallMode
@@ -45,7 +46,7 @@ const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
 }
 
-export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption, onOpenMobileChat }: LiveCallRoomProps) {
+export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, companyLogoUrl, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption, onOpenMobileChat }: LiveCallRoomProps) {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -704,9 +705,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
       <div className="flex flex-1 items-center justify-center py-6">
         <div className="text-center">
-          <div className={`mx-auto flex h-40 w-40 items-center justify-center rounded-full border border-white/10 ${status === 'active' ? 'animate-pulse-glow bg-white/10' : 'bg-white/5'}`}>
-            <Phone className="h-14 w-14" />
-          </div>
+          {companyLogoUrl ? (
+            <img src={companyLogoUrl} alt={companyName} className={`mx-auto h-44 w-44 rounded-full border border-white/10 object-cover shadow-2xl ${status === 'active' ? 'animate-pulse-glow' : ''}`} />
+          ) : (
+            <div className={`mx-auto flex h-44 w-44 items-center justify-center rounded-full border border-white/10 ${status === 'active' ? 'animate-pulse-glow bg-white/10' : 'bg-white/5'}`}>
+              <Phone className="h-14 w-14" />
+            </div>
+          )}
           <p className="mt-6 text-3xl font-bold tracking-tight" data-testid="live-call-mobile-duration">{formattedDuration}</p>
           <p className="mt-3 text-sm text-white/70" data-testid="live-call-mobile-status-text">
             {status === 'active' ? 'Ligação em andamento' : status === 'ringing' ? 'Chamando atendente' : status === 'waiting' ? 'Aguardando na fila' : 'Conectando chamada'}
@@ -721,8 +726,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       </div>
 
       {showMobileKeypad ? (
-        <div className="mb-24 px-2" data-testid="live-call-mobile-keypad-panel">
-          <div className="mx-auto grid max-w-sm grid-cols-3 gap-4">
+        <div className="absolute inset-0 z-20 flex flex-col bg-slate-950/95 px-5 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur" data-testid="live-call-mobile-keypad-panel">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white/65">Escolha uma opção</p>
+              <p className="font-semibold">Discagem da ligação</p>
+            </div>
+            <Button variant="outline" className="border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white" onClick={onToggleMobileKeypad} data-testid="live-call-mobile-keypad-close-button">
+              Sair
+            </Button>
+          </div>
+          <div className="mx-auto grid w-full max-w-xs flex-1 content-center grid-cols-3 gap-3">
             {dialpadKeys.map((key) => {
               const option = getOptionForDigit(key.digit)
               const selected = selectedCallMenuOption === key.digit
@@ -734,7 +748,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
                   className={`aspect-square rounded-full border text-center shadow-xl transition active:scale-95 ${selected ? 'border-sky-300 bg-sky-300/25' : 'border-white/10 bg-white/10 hover:bg-white/15'}`}
                   data-testid={`live-call-mobile-keypad-option-${key.digit}`}
                 >
-                  <p className="text-3xl font-semibold leading-none">{key.digit}</p>
+                  <p className="text-2xl font-semibold leading-none">{key.digit}</p>
                   <p className="mt-1 min-h-4 text-[10px] font-bold tracking-[0.22em] text-white/65">{option?.label ? String(option.label).slice(0, 12) : key.letters}</p>
                 </button>
               )
