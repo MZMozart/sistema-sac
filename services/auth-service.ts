@@ -28,6 +28,7 @@ import { auth, db, googleProvider, appleProvider } from '@/lib/firebase'
 import type { User, AccountType, Company } from '@/lib/types'
 
 const googleRedirectAccountTypeKey = 'atendepro.googleRedirect.accountType'
+const googleRegisterAccountTypeKey = 'atendepro.googleRegister.accountType'
 
 export class AuthService {
   static async ensureTabScopedSession() {
@@ -57,6 +58,24 @@ export class AuthService {
     if (typeof window === 'undefined') return
     try {
       window.localStorage.removeItem(googleRedirectAccountTypeKey)
+    } catch {
+      // Local storage can be unavailable in restricted embedded browsers.
+    }
+  }
+
+  static getPendingGoogleRegistrationType(): AccountType | null {
+    if (typeof window === 'undefined') return null
+    try {
+      return window.localStorage.getItem(googleRegisterAccountTypeKey) as AccountType | null
+    } catch {
+      return null
+    }
+  }
+
+  static clearPendingGoogleRegistrationType() {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.removeItem(googleRegisterAccountTypeKey)
     } catch {
       // Local storage can be unavailable in restricted embedded browsers.
     }
@@ -101,6 +120,64 @@ export class AuthService {
     await this.persistGoogleUser(result.user, pendingAccountType)
     this.clearPendingGoogleRedirectType()
     return result.user
+  }
+
+  static async startGoogleRegistration(accountType: AccountType): Promise<FirebaseUser> {
+    await this.ensureDeviceScopedSession()
+
+    if (this.isEmbeddedApp()) {
+      window.localStorage.setItem(googleRegisterAccountTypeKey, accountType)
+      await signInWithRedirect(auth, googleProvider)
+      return await new Promise<FirebaseUser>(() => undefined)
+    }
+
+    const result = await signInWithPopup(auth, googleProvider)
+    return result.user
+  }
+
+  static async completeGoogleRegistrationRedirect(): Promise<{ user: FirebaseUser; accountType: AccountType } | null> {
+    const pendingAccountType = this.getPendingGoogleRegistrationType()
+    if (!pendingAccountType) return null
+
+    await this.ensureDeviceScopedSession()
+    const result = await getRedirectResult(auth)
+    this.clearPendingGoogleRegistrationType()
+
+    if (!result?.user) return null
+    return { user: result.user, accountType: pendingAccountType }
+  }
+
+  static async finishGoogleRegistration(accountType: AccountType, userData: Partial<User>): Promise<FirebaseUser> {
+    const firebaseUser = auth.currentUser
+    if (!firebaseUser) {
+      throw Object.assign(new Error('auth/no-current-user'), { code: 'auth/no-current-user' })
+    }
+
+    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
+    if (userDoc.exists()) {
+      throw Object.assign(new Error('auth/email-already-in-use'), { code: 'auth/email-already-in-use' })
+    }
+
+    const newUser: Omit<User, 'uid' | 'createdAt'> = {
+      name: userData.name || userData.fullName || firebaseUser.displayName || '',
+      email: firebaseUser.email || userData.email || '',
+      phone: userData.phone || firebaseUser.phoneNumber || '',
+      accountType,
+      role: accountType === 'pj' ? 'owner' : 'client',
+      photoURL: firebaseUser.photoURL || userData.photoURL,
+      emailVerified: firebaseUser.emailVerified,
+      phoneVerified: Boolean(firebaseUser.phoneNumber),
+      connectedAccounts: ['google'],
+      ...userData,
+    }
+
+    await setDoc(doc(db, 'users', firebaseUser.uid), {
+      uid: firebaseUser.uid,
+      ...newUser,
+      createdAt: serverTimestamp(),
+    })
+
+    return firebaseUser
   }
 
   // Email and Password Authentication

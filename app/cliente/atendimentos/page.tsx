@@ -8,7 +8,6 @@ import { useAuth } from '@/contexts/auth-context'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, MessageSquare, Phone, Search } from 'lucide-react'
 
 function toDate(value: any) {
@@ -53,17 +52,36 @@ export default function ClientAttendancesPage() {
     }
   }, [user?.uid])
 
-  const filteredChats = useMemo(() => {
-    const text = search.trim().toLowerCase()
-    if (!text) return chats
-    return chats.filter((chat) => `${chat.protocolo || ''} ${chat.companyName || ''} ${chat.subject || ''} ${chat.status || ''}`.toLowerCase().includes(text))
-  }, [chats, search])
+  const attendances = useMemo(() => {
+    return [
+      ...chats.map((chat) => ({
+        id: `chat-${chat.id}`,
+        kind: 'chat' as const,
+        protocol: chat.protocolo || chat.id,
+        companyName: chat.companyName || 'Empresa',
+        status: chat.status || 'ativo',
+        subtitle: chat.subject || chat.lastMessage || 'Atendimento por chat',
+        href: `/cliente/chat/${chat.id}`,
+        date: toDate(chat.lastMessageAt || chat.createdAt),
+      })),
+      ...calls.map((call) => ({
+        id: `call-${call.id}`,
+        kind: 'call' as const,
+        protocol: call.protocolo || call.id,
+        companyName: call.companyName || 'Empresa',
+        status: call.status || 'waiting',
+        subtitle: 'Ligação registrada',
+        href: `/cliente/call/${call.id}`,
+        date: toDate(call.createdAt),
+      })),
+    ].sort((a, b) => b.date.getTime() - a.date.getTime())
+  }, [calls, chats])
 
-  const filteredCalls = useMemo(() => {
+  const filteredAttendances = useMemo(() => {
     const text = search.trim().toLowerCase()
-    if (!text) return calls
-    return calls.filter((call) => `${call.protocolo || ''} ${call.companyName || ''} ${call.status || ''}`.toLowerCase().includes(text))
-  }, [calls, search])
+    if (!text) return attendances
+    return attendances.filter((item) => `${item.protocol} ${item.companyName} ${item.status} ${item.subtitle}`.toLowerCase().includes(text))
+  }, [attendances, search])
 
   if (!loaded.chats || !loaded.calls) {
     return (
@@ -91,68 +109,36 @@ export default function ClientAttendancesPage() {
         />
       </div>
 
-      <Tabs defaultValue="chats" className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-2">
-          <TabsTrigger value="chats">Chats</TabsTrigger>
-          <TabsTrigger value="calls">Ligações</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="chats">
-          <Card className="glass border-border/80">
-            <CardHeader>
-              <CardTitle>Conversas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {filteredChats.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum chat registrado.</div>
-              ) : (
-                filteredChats.map((chat) => (
-                  <Link key={chat.id} href={`/cliente/chat/${chat.id}`} data-testid={`client-attendance-chat-${chat.id}`}>
-                    <div className="flex items-center justify-between gap-4 rounded-3xl border border-border bg-card/60 p-4 transition hover:border-primary/60">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary"><MessageSquare className="h-5 w-5" /></div>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">{chat.companyName || 'Empresa'}</p>
-                          <p className="truncate text-sm text-muted-foreground">Protocolo {chat.protocolo || chat.id}</p>
-                        </div>
-                      </div>
-                      <Badge variant="outline">{chat.status || 'ativo'}</Badge>
+      <Card className="glass border-border/80">
+        <CardHeader>
+          <CardTitle>Histórico por protocolo</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {filteredAttendances.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhum atendimento registrado.</div>
+          ) : (
+            filteredAttendances.map((item) => (
+              <Link key={item.id} href={item.href} data-testid={`client-attendance-${item.id}`}>
+                <div className="flex items-center justify-between gap-4 rounded-3xl border border-border bg-card/60 p-4 transition hover:border-primary/60">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      {item.kind === 'chat' ? <MessageSquare className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
                     </div>
-                  </Link>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="calls">
-          <Card className="glass border-border/80">
-            <CardHeader>
-              <CardTitle>Ligações</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {filteredCalls.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhuma ligação registrada.</div>
-              ) : (
-                filteredCalls.map((call) => (
-                  <Link key={call.id} href={`/cliente/call/${call.id}`} data-testid={`client-attendance-call-${call.id}`}>
-                    <div className="flex items-center justify-between gap-4 rounded-3xl border border-border bg-card/60 p-4 transition hover:border-primary/60">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Phone className="h-5 w-5" /></div>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">{call.companyName || 'Ligação'}</p>
-                          <p className="truncate text-sm text-muted-foreground">{call.protocolo || call.id}</p>
-                        </div>
-                      </div>
-                      <Badge variant="outline">{call.status || 'waiting'}</Badge>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">Protocolo {item.protocol}</p>
+                      <p className="truncate text-sm text-muted-foreground">{item.companyName} • {item.subtitle}</p>
                     </div>
-                  </Link>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <Badge variant="outline">{item.status}</Badge>
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{item.date.toLocaleDateString('pt-BR')}</span>
+                  </div>
+                </div>
+              </Link>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { firebaseEnvReady } from '@/lib/firebase'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Mail, Lock, ArrowLeft, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -135,10 +135,7 @@ export default function LoginPage() {
       {/* Header */}
       <header className="app-fixed-header fixed top-0 left-0 right-0 z-50 glass-strong border-b border-border">
         <div className="container mx-auto flex min-h-16 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Voltar</span>
-          </Link>
+          <div className="w-10" />
           <Logo size="sm" />
           <ThemeToggle />
         </div>

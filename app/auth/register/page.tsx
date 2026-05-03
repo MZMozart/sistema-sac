@@ -2,12 +2,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Building2, CheckCircle2, Loader2, Mail, Search, ShieldCheck, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Building2, CheckCircle2, Loader2, Mail, Search, ShieldCheck, UserRound } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { PhoneInput } from "@/components/phone-input";
 import { useAuth } from "@/contexts/auth-context";
+import { AuthService } from "@/services/auth-service";
 import { maskCPF, maskCNPJ } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,10 +49,11 @@ const genderOptions = [
 ];
 
 export default function RegisterPage() {
-  const { signInWithGoogle, signUp } = useAuth();
+  const { signUp } = useAuth();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [accountType, setAccountType] = useState<RegisterType | null>(null);
+  const [googleLinked, setGoogleLinked] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -78,6 +80,8 @@ export default function RegisterPage() {
     website: "",
     cep: "",
     address: "",
+    addressNumber: "",
+    addressComplement: "",
     neighborhood: "",
     city: "",
     state: "",
@@ -92,6 +96,38 @@ export default function RegisterPage() {
   );
 
   const progress = ((step + 1) / steps.length) * 100;
+
+  const applyGoogleUser = (firebaseUser: any, type: RegisterType) => {
+    const displayName = firebaseUser.displayName || "";
+    setAccountType(type);
+    setGoogleLinked(true);
+    setFormData((prev) => ({
+      ...prev,
+      email: firebaseUser.email || prev.email,
+      password: "",
+      profilePhoto: firebaseUser.photoURL || prev.profilePhoto,
+      fullName: type === "pf" ? displayName || prev.fullName : prev.fullName,
+      ownerFullName: type === "pj" ? displayName || prev.ownerFullName : prev.ownerFullName,
+    }));
+    setStep(2);
+  };
+
+  useEffect(() => {
+    if (!AuthService.getPendingGoogleRegistrationType()) return;
+
+    setLoading(true);
+    AuthService.completeGoogleRegistrationRedirect()
+      .then((result) => {
+        if (!result) return;
+        applyGoogleUser(result.user, result.accountType);
+        toast.success("Google conectado. Complete os dados obrigatórios para finalizar o cadastro.");
+      })
+      .catch((error: any) => {
+        AuthService.clearPendingGoogleRegistrationType();
+        toast.error(error?.message || "Não foi possível concluir o cadastro com Google.");
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -157,6 +193,8 @@ export default function RegisterPage() {
         phone: prev.phone || (data.telefone ? String(data.telefone).replace(/\D/g, "") : ""),
         cep: data.cep ? String(data.cep).replace(/\D/g, "") : prev.cep,
         address: [data.logradouro, data.numero].filter(Boolean).join(", ") || prev.address,
+        addressNumber: data.numero ? String(data.numero) : prev.addressNumber,
+        addressComplement: data.complemento || prev.addressComplement,
         neighborhood: data.bairro || prev.neighborhood,
         city: data.municipio || prev.city,
         state: data.uf || prev.state,
@@ -179,7 +217,7 @@ export default function RegisterPage() {
     }
 
     if (steps[step] === "credenciais") {
-      if (!formData.email || !formData.password || formData.password.length < 6) {
+      if (!formData.email || (!googleLinked && (!formData.password || formData.password.length < 6))) {
         toast.error("Informe email e senha com pelo menos 6 caracteres.");
         return false;
       }
@@ -193,8 +231,8 @@ export default function RegisterPage() {
     }
 
     if (steps[step] === "empresa") {
-      if (!formData.ownerFullName || !formData.razaoSocial || formData.cnpj.length !== 14 || !formData.phone || !formData.segmento) {
-        toast.error("Preencha dono, razão social, CNPJ, setor e telefone da empresa.");
+      if (!formData.ownerFullName || !formData.razaoSocial || formData.cnpj.length !== 14 || !formData.phone || !formData.segmento || formData.cep.length !== 8 || !formData.address || !formData.addressNumber) {
+        toast.error("Preencha dono, razão social, CNPJ, setor, telefone, CEP, endereço e número da empresa.");
         return false;
       }
     }
@@ -233,8 +271,9 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await signInWithGoogle(accountType);
-      toast.success("Conta criada com Google com sucesso.");
+      const firebaseUser = await AuthService.startGoogleRegistration(accountType);
+      applyGoogleUser(firebaseUser, accountType);
+      toast.success("Google conectado. Complete os dados obrigatórios para finalizar o cadastro.");
     } catch (error: any) {
       if (error?.code === "auth/unauthorized-domain") {
         toast.error("O domínio atual ainda não foi autorizado no Firebase para login Google.");
@@ -255,7 +294,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await signUp(formData.email, formData.password, accountType, {
+      const payload = {
         fullName: accountType === "pf" ? formData.fullName : formData.ownerFullName,
         ownerFullName: formData.ownerFullName,
         name: accountType === "pf" ? formData.fullName : formData.nomeFantasia || formData.razaoSocial,
@@ -263,7 +302,9 @@ export default function RegisterPage() {
         cpf: formData.cpf,
         cnpj: formData.cnpj,
         phone: formData.fullPhone || formData.phone,
-        address: [formData.address, formData.neighborhood, formData.city, formData.state].filter(Boolean).join(' - '),
+        address: [formData.address, formData.addressNumber, formData.addressComplement, formData.neighborhood, formData.city, formData.state].filter(Boolean).join(' - '),
+        addressNumber: formData.addressNumber,
+        addressComplement: formData.addressComplement,
         neighborhood: formData.neighborhood,
         cep: formData.cep,
         city: formData.city,
@@ -282,7 +323,14 @@ export default function RegisterPage() {
         settings: {
           uraScript: formData.uraScript,
         },
-      });
+      };
+
+      if (googleLinked) {
+        await AuthService.finishGoogleRegistration(accountType, payload);
+        window.location.href = accountType === "pj" ? "/dashboard/setup" : "/cliente/dashboard";
+      } else {
+        await signUp(formData.email, formData.password, accountType, payload);
+      }
       toast.success(accountType === "pj" ? "Conta empresarial criada. Vamos finalizar sua empresa." : "Conta criada com sucesso.");
     } catch (error: any) {
       if (error?.code === "auth/email-already-in-use") {
@@ -346,12 +394,18 @@ export default function RegisterPage() {
       <div className="grid gap-4">
         <div className="space-y-2">
           <Label htmlFor="register-email">Email</Label>
-          <Input id="register-email" data-testid="register-email-input" type="email" placeholder="voce@empresa.com" value={formData.email} onChange={(event) => updateField("email", event.target.value)} className="h-12" />
+          <Input id="register-email" data-testid="register-email-input" type="email" placeholder="voce@empresa.com" value={formData.email} onChange={(event) => updateField("email", event.target.value)} className="h-12" disabled={googleLinked} />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="register-password">Senha segura</Label>
-          <Input id="register-password" data-testid="register-password-input" type="password" placeholder="Mínimo 6 caracteres" value={formData.password} onChange={(event) => updateField("password", event.target.value)} className="h-12" />
-        </div>
+        {googleLinked ? (
+          <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 text-sm text-muted-foreground">
+            Google conectado. Continue preenchendo os dados obrigatórios para concluir o cadastro.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="register-password">Senha segura</Label>
+            <Input id="register-password" data-testid="register-password-input" type="password" placeholder="Mínimo 6 caracteres" value={formData.password} onChange={(event) => updateField("password", event.target.value)} className="h-12" />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -406,7 +460,15 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-address">Endereço</Label>
-        <Input id="register-address" data-testid="register-address-input" placeholder="Rua, número, cidade e estado" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+        <Input id="register-address" data-testid="register-address-input" placeholder="Rua / avenida" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="register-address-number">Número</Label>
+        <Input id="register-address-number" data-testid="register-address-number-input" placeholder="Número" value={formData.addressNumber} onChange={(event) => updateField("addressNumber", event.target.value)} className="h-12" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="register-address-complement">Complemento</Label>
+        <Input id="register-address-complement" data-testid="register-address-complement-input" placeholder="Apto, sala, bloco" value={formData.addressComplement} onChange={(event) => updateField("addressComplement", event.target.value)} className="h-12" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-neighborhood">Bairro</Label>
@@ -474,7 +536,15 @@ export default function RegisterPage() {
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="register-company-address">Endereço</Label>
-        <Input id="register-company-address" data-testid="register-company-address-input" placeholder="Rua, número, cidade e estado" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+        <Input id="register-company-address" data-testid="register-company-address-input" placeholder="Rua / avenida" value={formData.address} onChange={(event) => updateField("address", event.target.value)} className="h-12" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="register-company-address-number">Número</Label>
+        <Input id="register-company-address-number" data-testid="register-company-address-number-input" placeholder="Número" value={formData.addressNumber} onChange={(event) => updateField("addressNumber", event.target.value)} className="h-12" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="register-company-address-complement">Complemento</Label>
+        <Input id="register-company-address-complement" data-testid="register-company-address-complement-input" placeholder="Sala, loja, bloco" value={formData.addressComplement} onChange={(event) => updateField("addressComplement", event.target.value)} className="h-12" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="register-company-neighborhood">Bairro</Label>
@@ -563,10 +633,7 @@ export default function RegisterPage() {
     <div className="mesh-background min-h-screen overflow-hidden">
       <header className="glass-strong fixed inset-x-0 top-0 z-50 border-b border-border">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <Link href="/" className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground" data-testid="register-back-home-link">
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Link>
+          <div className="w-10" />
           <Logo size="sm" />
           <ThemeToggle />
         </div>

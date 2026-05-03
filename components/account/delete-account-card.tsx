@@ -51,7 +51,11 @@ export function DeleteAccountCard({ title, description, testIdPrefix }: DeleteAc
       })
       const data = await parseResponse(response)
       if (!response.ok) {
-        throw new Error(data.error === 'invalid-confirmation' ? 'Digite APAGAR para confirmar a exclusão.' : data.error || 'account-delete-failed')
+        const rawError = data.error || 'account-delete-failed'
+        const message = String(rawError).includes('UNAUTHENTICATED')
+          ? 'A credencial administrativa do Firebase ainda não está configurada na Vercel.'
+          : rawError
+        throw new Error(data.error === 'invalid-confirmation' ? 'Digite APAGAR para confirmar a exclusão.' : message)
       }
 
       toast.success(userData?.accountType === 'pj' && userData?.role === 'owner' ? 'Empresa e conta removidas com sucesso.' : 'Conta removida com sucesso.')

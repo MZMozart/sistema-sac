@@ -130,7 +130,7 @@ export function NotificationBell({ scope }: NotificationBellProps) {
       </Button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+12px)] z-[90] w-[360px] overflow-hidden rounded-[1.75rem] border border-border bg-background/95 shadow-[0_24px_80px_-32px_rgba(2,6,23,0.75)] backdrop-blur-2xl" data-testid={`${scope}-notification-panel`}>
+        <div className="fixed left-3 right-3 top-[calc(var(--app-header-height)+0.5rem)] z-[90] max-h-[calc(100dvh-var(--app-header-height)-1rem)] overflow-hidden rounded-[1.5rem] border border-border bg-background/95 shadow-[0_24px_80px_-32px_rgba(2,6,23,0.75)] backdrop-blur-2xl sm:absolute sm:left-auto sm:right-0 sm:top-[calc(100%+12px)] sm:w-[360px] sm:max-h-none sm:rounded-[1.75rem]" data-testid={`${scope}-notification-panel`}>
           <div className="flex items-center justify-between px-4 py-3">
             <p className="text-sm font-semibold">Notificações</p>
             <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Tempo real</span>
@@ -144,7 +144,7 @@ export function NotificationBell({ scope }: NotificationBellProps) {
             </Button>
           </div>
           <div className="border-t border-border/70" />
-          <div className="max-h-[420px] overflow-y-auto p-2">
+          <div className="max-h-[calc(100dvh-var(--app-header-height)-8rem)] overflow-y-auto p-2 sm:max-h-[420px]">
             {notifications.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground" data-testid={`${scope}-notification-empty-state`}>
                 Nenhuma notificação no momento.
