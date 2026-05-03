@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { collection, doc, increment, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { createNotification } from '@/lib/notifications'
@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { ArrowRight, FileText, Headphones, Loader2, MessageSquare, PhoneCall, UserRoundX, Volume2 } from 'lucide-react'
+import { ArrowRight, FileText, Headphones, Loader2, MessageSquare, PhoneCall, UserRoundX } from 'lucide-react'
 
 type CallSession = {
   id: string
@@ -71,6 +71,7 @@ export default function TelephonyPage() {
   const [attendants, setAttendants] = useState<AttendantRecord[]>([])
   const [search, setSearch] = useState('')
   const [activePanel, setActivePanel] = useState<'details' | 'chat' | 'transfer'>('details')
+  const audioRequestInFlightRef = useRef(false)
 
   useEffect(() => {
     if (!company?.id) return
@@ -129,7 +130,10 @@ export default function TelephonyPage() {
     }))
     .sort((a, b) => a.activeCount - b.activeCount)
 
-  const enableAudio = async () => {
+  const enableAudio = async (silent = false) => {
+    if (localStream && audioEnabled) return localStream
+    if (audioRequestInFlightRef.current) return null
+    audioRequestInFlightRef.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -143,8 +147,14 @@ export default function TelephonyPage() {
       })
       setLocalStream(stream)
       setAudioEnabled(true)
+      return stream
     } catch {
-      alert('Permita o uso do microfone para entrar na ligação pelo navegador.')
+      if (!silent) {
+        alert('Permita o uso do microfone para entrar na ligação pelo navegador.')
+      }
+      return null
+    } finally {
+      audioRequestInFlightRef.current = false
     }
   }
 
@@ -197,11 +207,12 @@ export default function TelephonyPage() {
 
     await rebalanceCallQueue(session.companyId)
     setSelectedSessionId(session.id)
-    setAudioEnabled(false)
   }
 
   const handleAttendQueue = async () => {
     if (nextWaitingSession) {
+      const stream = await enableAudio()
+      if (!stream) return
       await assumeCall(nextWaitingSession)
     }
   }
@@ -209,10 +220,11 @@ export default function TelephonyPage() {
   const handleNextClient = async () => {
     if (activeSession) {
       setSelectedSessionId(null)
-      setAudioEnabled(false)
     }
     const nextSession = waitingSessions.find((session) => session.id !== activeSession?.id)
     if (nextSession) {
+      const stream = await enableAudio()
+      if (!stream) return
       await assumeCall(nextSession)
     }
   }
@@ -272,6 +284,11 @@ export default function TelephonyPage() {
     setActivePanel('details')
   }, [activeSession?.id])
 
+  useEffect(() => {
+    if (!activeSession?.id || audioEnabled || audioRequestInFlightRef.current) return
+    enableAudio(true).catch(() => null)
+  }, [activeSession?.id, audioEnabled])
+
   if (activeSession) {
     return (
       <div className="fixed inset-x-0 bottom-0 top-16 z-20 overflow-hidden bg-background lg:left-24" data-testid="telephony-active-call-shell">
@@ -289,7 +306,7 @@ export default function TelephonyPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden p-4">
-              {audioEnabled ? (
+              {audioEnabled && localStream ? (
                 <LiveCallRoom
                   roomId={activeSession.id}
                   callId={activeSession.callId || activeSession.id}
@@ -309,9 +326,9 @@ export default function TelephonyPage() {
                 <Card className="glass h-full border-border/80">
                   <CardContent className="flex h-full items-center justify-center">
                     <div className="text-center">
-                      <p className="text-lg font-semibold">Ativar áudio da ligação</p>
-                      <p className="mt-2 text-sm text-muted-foreground">Clique para entrar com microfone e escutar o cliente em tempo real.</p>
-                      <Button className="mt-4" onClick={enableAudio} data-testid="telephony-enable-audio-button">Ativar áudio agora</Button>
+                      <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                      <p className="mt-4 text-lg font-semibold">Conectando áudio da ligação</p>
+                      <p className="mt-2 text-sm text-muted-foreground">O microfone e o áudio do cliente serão conectados automaticamente.</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -324,7 +341,6 @@ export default function TelephonyPage() {
                 <Button variant={activePanel === 'transfer' ? 'default' : 'outline'} onClick={() => setActivePanel('transfer')} data-testid="telephony-transfer-client-button"><UserRoundX className="mr-2 h-4 w-4" />Transferir cliente</Button>
                 <Button variant={activePanel === 'details' ? 'default' : 'outline'} onClick={() => setActivePanel('details')} data-testid="telephony-details-button"><FileText className="mr-2 h-4 w-4" />Detalhes da ligação</Button>
                 <Button variant={activePanel === 'chat' ? 'default' : 'outline'} onClick={() => setActivePanel('chat')} data-testid="telephony-send-message-button"><MessageSquare className="mr-2 h-4 w-4" />Enviar mensagem</Button>
-                <Button variant="outline" onClick={enableAudio} data-testid="telephony-hear-remote-button"><Volume2 className="mr-2 h-4 w-4" />Ouvir ligação</Button>
               </div>
             </div>
           </div>

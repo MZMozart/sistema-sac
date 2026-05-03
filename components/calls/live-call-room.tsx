@@ -71,7 +71,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const [initError, setInitError] = useState<string | null>(null)
   const [retryToken, setRetryToken] = useState(0)
   const [remoteAudioReady, setRemoteAudioReady] = useState(false)
-  const [remoteNeedsInteraction, setRemoteNeedsInteraction] = useState(false)
   const auditProtocol = protocol || callId
 
   const attachStreamForRecording = (stream: MediaStream) => {
@@ -124,15 +123,30 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     }
   }
 
+  const bindRemoteAudio = () => {
+    const audio = remoteAudioRef.current
+    const stream = remoteStreamRef.current
+    if (!audio || !stream || stream.getAudioTracks().length === 0) return false
+    if (audio.srcObject !== stream) {
+      audio.srcObject = stream
+    }
+    audio.autoplay = true
+    audio.muted = false
+    audio.playsInline = true
+    audio.volume = Math.max(0, Math.min(1, (audioSettings?.callVolume ?? 100) / 100))
+    const outputId = audioSettings?.outputDeviceId
+    if (outputId && outputId !== 'default' && typeof (audio as any).setSinkId === 'function') {
+      ;(audio as any).setSinkId(outputId).catch(() => null)
+    }
+    return true
+  }
+
   const playRemoteAudio = async () => {
-    if (!remoteAudioRef.current) return
+    if (!bindRemoteAudio() || !remoteAudioRef.current) return
     try {
-      remoteAudioRef.current.muted = false
-      remoteAudioRef.current.volume = Math.max(0, Math.min(1, (audioSettings?.callVolume ?? 100) / 100))
       await remoteAudioRef.current.play()
-      setRemoteNeedsInteraction(false)
     } catch {
-      setRemoteNeedsInteraction(true)
+      // Alguns navegadores liberam áudio remoto apenas após uma interação direta na tela.
     }
   }
 
@@ -249,15 +263,20 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   useEffect(() => {
     if (!remoteAudioReady) return
+    bindRemoteAudio()
     const resume = () => playRemoteAudio().catch(() => null)
-    window.addEventListener('pointerdown', resume, { once: true })
-    window.addEventListener('keydown', resume, { once: true })
+    window.addEventListener('pointerdown', resume)
+    window.addEventListener('click', resume)
+    window.addEventListener('keydown', resume)
+    window.addEventListener('touchstart', resume)
     playRemoteAudio().catch(() => null)
     return () => {
       window.removeEventListener('pointerdown', resume)
+      window.removeEventListener('click', resume)
       window.removeEventListener('keydown', resume)
+      window.removeEventListener('touchstart', resume)
     }
-  }, [remoteAudioReady])
+  }, [remoteAudioReady, audioSettings?.callVolume, audioSettings?.outputDeviceId])
 
   const formattedDuration = useMemo(() => `${String(Math.floor(duration / 60)).padStart(2, '0')}:${String(duration % 60).padStart(2, '0')}`, [duration])
   const dialpadKeys = [
@@ -358,18 +377,19 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       const canUsePeer = () => isCurrentRun() && peerConnectionRef.current === peerConnection && peerConnection.signalingState !== 'closed'
 
       peerConnection.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track))
-        attachStreamForRecording(event.streams[0])
-        setRemoteAudioReady(true)
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = remoteStream
-          remoteAudioRef.current.volume = Math.max(0, Math.min(1, (audioSettings?.callVolume ?? 100) / 100))
-          const outputId = audioSettings?.outputDeviceId
-          if (outputId && outputId !== 'default' && typeof (remoteAudioRef.current as any).setSinkId === 'function') {
-            ;(remoteAudioRef.current as any).setSinkId(outputId).catch(() => null)
+        const incomingStream = event.streams[0] || new MediaStream([event.track])
+        incomingStream.getTracks().forEach((track) => {
+          if (!remoteStream.getTracks().some((currentTrack) => currentTrack.id === track.id)) {
+            remoteStream.addTrack(track)
           }
-          playRemoteAudio().catch(() => null)
-        }
+        })
+        attachStreamForRecording(incomingStream)
+        setRemoteAudioReady(true)
+        event.track.onunmute = () => playRemoteAudio().catch(() => null)
+        bindRemoteAudio()
+        playRemoteAudio().catch(() => null)
+        window.setTimeout(() => playRemoteAudio().catch(() => null), 250)
+        window.setTimeout(() => playRemoteAudio().catch(() => null), 1000)
       }
 
       peerConnection.onconnectionstatechange = async () => {
@@ -435,7 +455,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
             })
           } catch {}
         }
-        if (['disconnected', 'failed', 'closed'].includes(state)) {
+        if (state === 'closed') {
           setStatus('ended')
         }
       }
@@ -556,11 +576,8 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   useEffect(() => {
     if (!remoteAudioRef.current) return
-    remoteAudioRef.current.volume = Math.max(0, Math.min(1, (audioSettings?.callVolume ?? 100) / 100))
-    const outputId = audioSettings?.outputDeviceId
-    if (outputId && outputId !== 'default' && typeof (remoteAudioRef.current as any).setSinkId === 'function') {
-      ;(remoteAudioRef.current as any).setSinkId(outputId).catch(() => null)
-    }
+    bindRemoteAudio()
+    playRemoteAudio().catch(() => null)
   }, [audioSettings?.callVolume, audioSettings?.outputDeviceId])
 
   const toggleMute = async () => {
@@ -736,14 +753,8 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       </div>
 
       <div className="rounded-2xl border border-border bg-card/60 p-4 text-sm text-muted-foreground" data-testid="live-call-audio-card">
-        <div className="flex items-center gap-2"><Volume2 className="h-4 w-4 text-primary" /> Áudio remoto conectado automaticamente quando o outro participante entra.</div>
+        <div className="flex items-center gap-2"><Volume2 className="h-4 w-4 text-primary" /> Áudio da ligação conectado automaticamente.</div>
         <p className="mt-2 text-xs text-muted-foreground">Volume da chamada: {audioSettings?.callVolume ?? 100}% • Entrada: {audioSettings?.inputDeviceId || 'default'} • Saída: {audioSettings?.outputDeviceId || 'default'}</p>
-        {remoteAudioReady ? (
-          <Button variant="outline" className="mt-3" onClick={playRemoteAudio} data-testid="live-call-play-remote-audio-button">
-            <Volume2 className="mr-2 h-4 w-4" />
-            {remoteNeedsInteraction ? 'Ativar som do outro participante' : 'Reproduzir áudio remoto'}
-          </Button>
-        ) : null}
       </div>
     </>
   )
@@ -768,12 +779,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           <p className="mt-3 text-sm text-white/70" data-testid="live-call-mobile-status-text">
             {status === 'active' ? 'Ligação em andamento' : status === 'ringing' ? 'Chamando atendente' : status === 'waiting' ? 'Aguardando na fila' : 'Conectando chamada'}
           </p>
-          {remoteAudioReady ? (
-            <Button variant="outline" className="mt-5 border-white/15 bg-white/10 text-white hover:bg-white/15" onClick={playRemoteAudio} data-testid="live-call-mobile-play-remote-audio-button">
-              <Volume2 className="mr-2 h-4 w-4" />
-              {remoteNeedsInteraction ? 'Ativar áudio' : 'Ouvir ligação'}
-            </Button>
-          ) : null}
         </div>
       </div>
 
@@ -834,6 +839,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   return (
     <Card className={immersive ? 'flex h-full touch-none flex-col overflow-hidden overscroll-none rounded-none border-0 bg-transparent shadow-none md:rounded-[2rem] md:border md:border-border/80 md:bg-card/50' : 'glass border-border/80'}>
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       <CardHeader className={immersive ? 'hidden md:block' : ''}>
         <CardTitle>Ligação em tempo real</CardTitle>
         <CardDescription>{companyName} — voz WebRTC entre cliente e atendente.</CardDescription>
@@ -857,7 +863,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
                 {renderMobileImmersiveLayout()}
               </>
             ) : renderDesktopLayout()}
-            <audio ref={remoteAudioRef} autoPlay playsInline />
           </>
         )}
       </CardContent>
