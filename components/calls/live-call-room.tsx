@@ -697,13 +697,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   )
 
   const renderMobileImmersiveLayout = () => (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-none bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_rgba(15,23,42,0.96)_58%)] p-6 text-white md:hidden" data-testid="live-call-mobile-layout">
+    <div className="relative flex h-full touch-none select-none flex-col overflow-hidden overscroll-none rounded-none bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_rgba(15,23,42,0.96)_58%)] p-6 text-white md:hidden" data-testid="live-call-mobile-layout">
       <div className="pt-4 text-center">
         <Badge variant="outline" className="border-white/20 bg-white/10 text-white" data-testid="live-call-mobile-status-badge">{status}</Badge>
         <p className="mt-3 text-sm text-white/70" data-testid="live-call-mobile-company-name">{companyName}</p>
       </div>
 
-      <div className="flex flex-1 items-center justify-center py-6">
+      <div className="flex flex-1 items-center justify-center py-6 pb-24">
         <div className="text-center">
           {companyLogoUrl ? (
             <img src={companyLogoUrl} alt={companyName} className={`mx-auto h-44 w-44 rounded-full border border-white/10 object-cover shadow-2xl ${status === 'active' ? 'animate-pulse-glow' : ''}`} />
@@ -781,12 +781,12 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   )
 
   return (
-    <Card className={immersive ? 'flex h-full flex-col overflow-hidden rounded-none border-0 bg-transparent shadow-none md:rounded-[2rem] md:border md:border-border/80 md:bg-card/50' : 'glass border-border/80'}>
+    <Card className={immersive ? 'flex h-full touch-none flex-col overflow-hidden overscroll-none rounded-none border-0 bg-transparent shadow-none md:rounded-[2rem] md:border md:border-border/80 md:bg-card/50' : 'glass border-border/80'}>
       <CardHeader className={immersive ? 'hidden md:block' : ''}>
         <CardTitle>Ligação em tempo real</CardTitle>
         <CardDescription>{companyName} — voz WebRTC entre cliente e atendente.</CardDescription>
       </CardHeader>
-      <CardContent className={immersive ? 'flex min-h-0 flex-1 flex-col justify-between space-y-6' : 'space-y-6'}>
+      <CardContent className={immersive ? 'flex min-h-0 flex-1 flex-col justify-between overflow-hidden p-0 md:space-y-6 md:p-6' : 'space-y-6'}>
         {loading ? (
           <div className="flex items-center justify-center py-10"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>
         ) : initError ? (

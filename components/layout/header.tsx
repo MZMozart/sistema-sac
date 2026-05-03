@@ -19,7 +19,7 @@ type HeaderProps = {
 
 export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
   const router = useRouter()
-  const { userData, signOut } = useAuth()
+  const { userData, company, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -46,8 +46,11 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
     })
   }
 
-  const name = userData?.fullName || userData?.name || userData?.email || 'Usuário'
+  const name = scope === 'company'
+    ? company?.nomeFantasia || company?.razaoSocial || userData?.fullName || userData?.name || userData?.email || 'Usuário'
+    : userData?.fullName || userData?.name || userData?.email || 'Usuário'
   const initials = name.charAt(0).toUpperCase()
+  const avatarUrl = scope === 'company' ? company?.logoURL || userData?.photoURL : userData?.photoURL
 
   const toggleSidebar = () => {
     if (typeof window !== 'undefined') {
@@ -78,7 +81,7 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
             data-testid={`${scope}-header-menu-trigger`}
           >
             <Avatar className="h-10 w-10 border border-primary/20">
-              <AvatarImage src={userData?.photoURL} />
+              <AvatarImage src={avatarUrl} />
               <AvatarFallback className="bg-gradient-primary text-white">{initials}</AvatarFallback>
             </Avatar>
           </Button>

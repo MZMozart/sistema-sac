@@ -35,21 +35,6 @@ export default function ClientCallPage() {
   const autoStartedRef = useRef(false)
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
 
-  const dialpadKeys = [
-    { digit: '1', letters: '' },
-    { digit: '2', letters: 'ABC' },
-    { digit: '3', letters: 'DEF' },
-    { digit: '4', letters: 'GHI' },
-    { digit: '5', letters: 'JKL' },
-    { digit: '6', letters: 'MNO' },
-    { digit: '7', letters: 'PQRS' },
-    { digit: '8', letters: 'TUV' },
-    { digit: '9', letters: 'WXYZ' },
-    { digit: '*', letters: '' },
-    { digit: '0', letters: '+' },
-    { digit: '#', letters: '' },
-  ]
-
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'call_sessions', id), (snap) => {
       if (snap.exists()) {
@@ -124,9 +109,20 @@ export default function ClientCallPage() {
       speakText(callBotSpeech).then(() => {
         spokenRef.current = true
       }).catch(() => {
-        toast.error('Não foi possível tocar a voz automática da ligação agora.')
+        fallbackSpeakText(callBotSpeech)
+        spokenRef.current = true
       })
     }
+  }
+
+  const fallbackSpeakText = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text.trim()) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text.slice(0, 900))
+    utterance.lang = 'pt-BR'
+    utterance.volume = botVoiceVolume
+    utterance.rate = Number(company?.settings?.callBotVoiceSpeed || 1)
+    window.speechSynthesis.speak(utterance)
   }
 
   const speakText = async (text: string) => {
@@ -144,7 +140,8 @@ export default function ClientCallPage() {
     })
 
     if (!response.ok) {
-      throw new Error(await response.text())
+      fallbackSpeakText(text)
+      return
     }
 
     const blob = await response.blob()
@@ -152,7 +149,9 @@ export default function ClientCallPage() {
     if (ttsAudioRef.current) {
       ttsAudioRef.current.src = audioUrl
       ttsAudioRef.current.volume = botVoiceVolume
-      await ttsAudioRef.current.play()
+      await ttsAudioRef.current.play().catch(() => fallbackSpeakText(text))
+    } else {
+      fallbackSpeakText(text)
     }
   }
 
@@ -168,7 +167,10 @@ export default function ClientCallPage() {
 
     speakText(callBotSpeech).then(() => {
       spokenRef.current = true
-    }).catch(() => null)
+    }).catch(() => {
+      fallbackSpeakText(callBotSpeech)
+      spokenRef.current = true
+    })
   }, [audioEnabled, callBotSpeech, session])
 
   useEffect(() => {
@@ -253,35 +255,6 @@ export default function ClientCallPage() {
     }
   }
 
-  const optionForDigit = (digit: string) => callBotOptions.find((option: any) => String(option?.digit) === digit)
-
-  const renderDialpad = (dark = false) => (
-    <div className="mx-auto grid max-w-sm grid-cols-3 gap-4" data-testid="client-call-dialpad">
-      {dialpadKeys.map((key) => {
-        const option = optionForDigit(key.digit)
-        const selected = selectedOption === key.digit
-        return (
-          <button
-            key={key.digit}
-            type="button"
-            onClick={() => selectCallOption(option || { digit: key.digit, label: `Tecla ${key.digit}` })}
-            className={`aspect-square rounded-full border text-center shadow-lg transition active:scale-95 ${
-              selected
-                ? dark ? 'border-sky-300 bg-sky-300/25 text-white' : 'border-primary bg-primary/10 text-foreground'
-                : dark ? 'border-white/10 bg-white/10 text-white hover:bg-white/15' : 'border-border bg-card/80 text-foreground hover:border-primary/60'
-            }`}
-            data-testid={`client-call-dialpad-key-${key.digit}`}
-          >
-            <span className="block text-3xl font-semibold leading-none">{key.digit}</span>
-            <span className={`mt-1 block min-h-4 text-[10px] font-bold tracking-[0.22em] ${dark ? 'text-white/65' : 'text-muted-foreground'}`}>
-              {option?.label ? String(option.label).slice(0, 12) : key.letters}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-
   const submitRating = async () => {
     if (!user || !session || ratingSaved) return
     setSavingRating(true)
@@ -329,7 +302,7 @@ export default function ClientCallPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex overflow-hidden bg-background" data-testid="client-call-page">
+    <div className="fixed inset-0 z-50 flex h-[100dvh] w-screen touch-none select-none overflow-hidden overscroll-none bg-background" data-testid="client-call-page">
       <div className={`grid h-full min-h-0 w-full overflow-hidden bg-background ${session.status === 'active' ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <header className="shrink-0 border-b border-border bg-background/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur">
@@ -346,17 +319,6 @@ export default function ClientCallPage() {
           </div>
         </div>
       </header>
-
-      {session.status !== 'active' ? (
-        <div className="shrink-0 space-y-4 border-b border-border px-4 py-4">
-          {typeof session?.queuePosition === 'number' ? (
-            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3 text-xs text-primary" data-testid="client-call-queue-banner">
-              Sua posição na fila: {session.queuePosition} • Pessoas na sua frente: {Math.max(0, Number(session.queuePosition || 1) - 1)}
-            </div>
-          ) : null}
-          {renderDialpad(false)}
-        </div>
-      ) : null}
 
       <div className={`min-h-0 flex-1 overflow-hidden ${session.status === 'active' ? 'p-0 sm:p-4' : 'p-4'}`}>
         {audioEnabled ? (
