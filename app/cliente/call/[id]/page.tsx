@@ -33,7 +33,13 @@ export default function ClientCallPage() {
   const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
-  const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
+  const localCallStreamRef = useRef<MediaStream | null>(null)
+  const callAudioGraphRef = useRef<{
+    context: AudioContext
+    destination: MediaStreamAudioDestinationNode
+    botGain: GainNode
+    micStream: MediaStream
+  } | null>(null)
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'call_sessions', id), (snap) => {
@@ -84,10 +90,10 @@ export default function ClientCallPage() {
   }, [company?.settings?.audioSettings?.botVoiceVolume])
 
   const enableAudio = async () => {
-    let stream: MediaStream
+    let microphoneStream: MediaStream
     try {
       // WebRTC precisa de uma acao do usuario para liberar microfone e audio no navegador.
-      stream = await navigator.mediaDevices.getUserMedia({
+      microphoneStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           ...(company?.settings?.audioSettings?.inputDeviceId && company.settings.audioSettings.inputDeviceId !== 'default'
             ? { deviceId: { exact: company.settings.audioSettings.inputDeviceId } }
@@ -97,21 +103,28 @@ export default function ClientCallPage() {
           autoGainControl: true,
         },
       })
-      setLocalStream(stream)
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+      if (!AudioContextCtor) {
+        localCallStreamRef.current = microphoneStream
+        setLocalStream(microphoneStream)
+      } else {
+        const context = new AudioContextCtor()
+        await context.resume().catch(() => null)
+        const destination = context.createMediaStreamDestination()
+        const botGain = context.createGain()
+        botGain.gain.value = botVoiceVolume
+        context.createMediaStreamSource(microphoneStream).connect(destination)
+        botGain.connect(destination)
+        botGain.connect(context.destination)
+        callAudioGraphRef.current = { context, destination, botGain, micStream: microphoneStream }
+        localCallStreamRef.current = destination.stream
+        setLocalStream(destination.stream)
+      }
       setAudioEnabled(true)
       setMobileCallPanel('call')
     } catch {
       toast.error('Permita o uso do microfone para iniciar a chamada no navegador.')
       return
-    }
-
-    if (callBotSpeech && !spokenRef.current && session?.status !== 'ended') {
-      speakText(callBotSpeech).then(() => {
-        spokenRef.current = true
-      }).catch(() => {
-        fallbackSpeakText(callBotSpeech)
-        spokenRef.current = true
-      })
     }
   }
 
@@ -146,11 +159,26 @@ export default function ClientCallPage() {
 
     const blob = await response.blob()
     const audioUrl = URL.createObjectURL(blob)
-    if (ttsAudioRef.current) {
-      ttsAudioRef.current.src = audioUrl
-      ttsAudioRef.current.volume = botVoiceVolume
-      await ttsAudioRef.current.play().catch(() => fallbackSpeakText(text))
+    const graph = callAudioGraphRef.current
+    if (graph) {
+      await graph.context.resume().catch(() => null)
+      graph.botGain.gain.value = botVoiceVolume
+      const audio = new Audio(audioUrl)
+      audio.crossOrigin = 'anonymous'
+      audio.preload = 'auto'
+      audio.volume = 1
+      const source = graph.context.createMediaElementSource(audio)
+      source.connect(graph.botGain)
+      audio.onended = () => {
+        source.disconnect()
+        URL.revokeObjectURL(audioUrl)
+      }
+      await audio.play().catch(() => {
+        URL.revokeObjectURL(audioUrl)
+        fallbackSpeakText(text)
+      })
     } else {
+      URL.revokeObjectURL(audioUrl)
       fallbackSpeakText(text)
     }
   }
@@ -165,19 +193,27 @@ export default function ClientCallPage() {
     if (!audioEnabled || !callBotSpeech || !session || session.status === 'ended') return
     if (spokenRef.current) return
 
-    speakText(callBotSpeech).then(() => {
-      spokenRef.current = true
-    }).catch(() => {
-      fallbackSpeakText(callBotSpeech)
-      spokenRef.current = true
-    })
+    const timer = window.setTimeout(() => {
+      speakText(callBotSpeech).then(() => {
+        spokenRef.current = true
+      }).catch(() => {
+        fallbackSpeakText(callBotSpeech)
+        spokenRef.current = true
+      })
+    }, 900)
+
+    return () => window.clearTimeout(timer)
   }, [audioEnabled, callBotSpeech, session])
 
   useEffect(() => {
     return () => {
-      localStream?.getTracks().forEach((track) => track.stop())
+      localCallStreamRef.current?.getTracks().forEach((track) => track.stop())
+      callAudioGraphRef.current?.micStream.getTracks().forEach((track) => track.stop())
+      callAudioGraphRef.current?.context.close().catch(() => null)
+      localCallStreamRef.current = null
+      callAudioGraphRef.current = null
     }
-  }, [localStream])
+  }, [])
 
   const selectCallOption = async (option: any) => {
     if (!session) return
@@ -321,7 +357,7 @@ export default function ClientCallPage() {
       </header>
 
       <div className={`min-h-0 flex-1 overflow-hidden ${session.status === 'active' ? 'p-0 sm:p-4' : 'p-4'}`}>
-        {audioEnabled ? (
+        {audioEnabled && localStream ? (
           <LiveCallRoom
             roomId={id}
             callId={session.callId || id}
@@ -363,7 +399,6 @@ export default function ClientCallPage() {
           </div>
         )}
       </div>
-      <audio ref={ttsAudioRef} preload="auto" className="hidden" />
 
       {(session.status === 'ended' || session.status === 'completed') ? (
         <Card className="m-4 mt-0 shrink-0 glass border-border/80">
