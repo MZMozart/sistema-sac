@@ -4,7 +4,7 @@ import { getServerUser } from '@/lib/server-auth'
 
 export async function GET(request: NextRequest, { params }: { params: { sessionId: string } }) {
   try {
-    const stripeApiKey = process.env.STRIPE_API_KEY
+    const stripeApiKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
     if (!stripeApiKey) {
       return NextResponse.json({ error: 'stripe-key-missing' }, { status: 500 })
     }

@@ -10,7 +10,7 @@ function toFormBody(values: Record<string, string>) {
 
 export async function POST(request: NextRequest) {
   try {
-    const stripeApiKey = process.env.STRIPE_API_KEY
+    const stripeApiKey = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY
     if (!stripeApiKey) {
       return NextResponse.json({ error: 'stripe-key-missing' }, { status: 500 })
     }
