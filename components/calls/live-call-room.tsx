@@ -186,9 +186,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       remoteStreamRef.current = remoteStream
 
       const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
-      audioContextRef.current = new AudioContextCtor()
-      await audioContextRef.current.resume().catch(() => null)
-      destinationRef.current = audioContextRef.current.createMediaStreamDestination()
+      if (!AudioContextCtor) {
+        throw new Error('Este navegador não oferece suporte ao áudio da chamada.')
+      }
+      const audioContext = new AudioContextCtor()
+      audioContextRef.current = audioContext
+      await audioContext.resume().catch(() => null)
+      if (!isCurrentRun() || audioContextRef.current !== audioContext) {
+        await audioContext.close().catch(() => null)
+        return
+      }
+      destinationRef.current = audioContext.createMediaStreamDestination()
       attachStreamForRecording(localStream)
 
       const peerConnection = new RTCPeerConnection(rtcConfig)
