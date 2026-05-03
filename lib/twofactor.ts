@@ -16,9 +16,15 @@ export function verifyTwoFactorCode(code: string, secret: string) {
   const token = normalizeTwoFactorCode(code)
   if (!token || token.length !== 6 || !secret) return false
 
-  return verifySync({
-    token,
-    secret,
-    window: 1,
-  } as any)
+  try {
+    const result = verifySync({
+      token,
+      secret,
+      epochTolerance: 90,
+    } as any)
+
+    return Boolean(result?.valid)
+  } catch {
+    return false
+  }
 }
