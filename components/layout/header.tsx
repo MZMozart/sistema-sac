@@ -9,7 +9,7 @@ import { NotificationBell } from '@/components/notifications/notification-bell'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogOut, Menu, Settings, UserCircle2 } from 'lucide-react'
+import { LogOut, Menu, RefreshCw, Settings, UserCircle2 } from 'lucide-react'
 
 type HeaderProps = {
   scope: 'client' | 'company'
@@ -21,7 +21,12 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
   const router = useRouter()
   const { userData, company, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [isDesktopShell, setIsDesktopShell] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    setIsDesktopShell(typeof window !== 'undefined' && Boolean((window as any).desktopShell?.isDesktop))
+  }, [])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -58,6 +63,10 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
     }
   }
 
+  const refreshApp = () => {
+    window.location.reload()
+  }
+
   return (
     <header className="app-fixed-header fixed inset-x-0 top-0 z-40 border-b border-border bg-background/92 backdrop-blur-xl">
       <div className="flex min-h-16 items-center justify-between px-4 lg:px-6">
@@ -71,6 +80,11 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
         </div>
 
         <div className="flex items-center gap-2 lg:gap-3" ref={containerRef}>
+          {isDesktopShell ? (
+            <Button type="button" variant="ghost" size="icon" onClick={refreshApp} aria-label="Atualizar sistema" title="Atualizar sistema" data-testid={`${scope}-header-refresh-button`}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          ) : null}
           <ThemeToggle />
           <NotificationBell scope={scope} />
 

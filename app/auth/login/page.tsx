@@ -10,9 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { firebaseEnvReady } from '@/lib/firebase'
+import { auth, firebaseEnvReady } from '@/lib/firebase'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, Loader2, RefreshCw } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -22,17 +22,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [twoFactorRequired, setTwoFactorRequired] = useState(false)
+  const [canResetTwoFactor, setCanResetTwoFactor] = useState(false)
+  const [isDesktopShell, setIsDesktopShell] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [keepSignedIn, setKeepSignedIn] = useState(true)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
+    setIsDesktopShell(typeof window !== 'undefined' && Boolean((window as any).desktopShell?.isDesktop))
     const params = new URLSearchParams(window.location.search)
     if (params.get('googleAuthError') === 'storage') {
       toast.error('NÃ£o foi possÃ­vel concluir o login Google neste navegador. Tente novamente ou entre com email e senha.')
       router.replace('/auth/login')
     }
   }, [router])
+
+  const redirectAfterTwoFactorReset = () => {
+    const pendingType = sessionStorage.getItem('twoFactorPendingType')
+    sessionStorage.removeItem('twoFactorPending')
+    sessionStorage.removeItem('twoFactorPendingType')
+    window.location.href = pendingType === 'cliente' ? '/cliente/dashboard' : '/dashboard'
+  }
+
+  const handleRefreshApp = () => {
+    window.location.reload()
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,7 +128,35 @@ export default function LoginPage() {
       await verifyTwoFactorLogin(twoFactorCode)
       toast.success('2FA validado com sucesso!')
     } catch (error: any) {
+      setCanResetTwoFactor(true)
       toast.error('Código 2FA inválido ou expirado.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResetTwoFactor = async () => {
+    const firebaseUser = auth.currentUser
+    if (!firebaseUser) {
+      toast.error('Faça login com e-mail e senha novamente antes de redefinir o 2FA.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const token = await firebaseUser.getIdToken()
+      const response = await fetch('/api/twofactor/reset-login', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) throw new Error('twofactor-reset-failed')
+      toast.success('2FA redefinido. Você já pode entrar e configurar novamente depois.')
+      redirectAfterTwoFactorReset()
+    } catch {
+      toast.error('Não foi possível redefinir o 2FA agora.')
     } finally {
       setLoading(false)
     }
@@ -127,7 +169,14 @@ export default function LoginPage() {
         <div className="container mx-auto flex min-h-16 items-center justify-between px-4">
           <div className="w-10" />
           <Logo size="sm" />
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            {isDesktopShell ? (
+              <Button type="button" variant="ghost" size="icon" onClick={handleRefreshApp} aria-label="Atualizar sistema" title="Atualizar sistema" data-testid="login-desktop-refresh-button">
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
@@ -330,6 +379,11 @@ export default function LoginPage() {
                   <Button type="button" variant="outline" className="w-full" onClick={() => { setTwoFactorRequired(false); setTwoFactorCode('') }} disabled={loading}>
                     Voltar para login
                   </Button>
+                  {canResetTwoFactor ? (
+                    <Button type="button" variant="destructive" className="w-full" onClick={handleResetTwoFactor} disabled={loading} data-testid="login-twofactor-reset-button">
+                      Redefinir 2FA desta conta e entrar
+                    </Button>
+                  ) : null}
                 </form>
               )}
 
