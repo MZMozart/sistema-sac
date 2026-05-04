@@ -30,7 +30,7 @@ type CallSession = {
   queuePosition?: number | null
   selectedOptionLabel?: string
   selectedOptionDescription?: string
-  status: 'waiting' | 'ringing' | 'active' | 'ended' | 'completed'
+  status: 'bot' | 'waiting' | 'ringing' | 'active' | 'ended' | 'completed'
   createdAt?: any
   recordingUrl?: string | null
   recordingRequired?: boolean
@@ -110,7 +110,7 @@ export default function TelephonyPage() {
   }, [localStream])
 
   const waitingSessions = useMemo(
-    () => sessions.filter((session) => ['waiting', 'ringing'].includes(session.status)).sort((a, b) => Number(a.queuePosition || 9999) - Number(b.queuePosition || 9999)),
+    () => sessions.filter((session) => session.status === 'waiting').sort((a, b) => Number(a.queuePosition || 9999) - Number(b.queuePosition || 9999)),
     [sessions]
   )
 

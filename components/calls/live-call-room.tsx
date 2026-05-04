@@ -63,6 +63,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const mutedDurationRef = useRef(0)
   const connectionDropsRef = useRef(0)
   const recordingFinalizedRef = useRef(false)
+  const manualEndingRef = useRef(false)
 
   const [status, setStatus] = useState<'connecting' | 'waiting' | 'ringing' | 'active' | 'ended'>('connecting')
   const [muted, setMuted] = useState(false)
@@ -224,7 +225,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         recorder.requestData()
         recorder.stop()
       } else {
-        resolve(null)
+        uploadRecording().then(resolve).catch(() => resolve(null))
       }
     })
   }
@@ -276,6 +277,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   useEffect(() => {
     if (status !== 'ended') return
+    if (manualEndingRef.current) return
     stopRecorderAndUpload().catch(() => null)
   }, [status])
 
@@ -491,7 +493,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           callId,
           channel: 'call',
           eventType: 'call_created',
-          summary: 'Ligação criada e aguardando atendimento humano.',
+          summary: 'Ligação criada com atendimento inicial do BOT.',
         })
         peerConnection.onicecandidate = async (event) => {
           if (event.candidate) {
@@ -666,6 +668,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       localMuteStartedAtRef.current = null
     }
 
+    manualEndingRef.current = true
     setStatus('ended')
 
     const baseEndPayload = {

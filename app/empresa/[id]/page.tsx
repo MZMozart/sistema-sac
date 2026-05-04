@@ -32,7 +32,6 @@ import { db } from '@/lib/firebase'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
 import { buildSectorRanking, calculateCompanyPerformance } from '@/lib/company-performance'
-import { rebalanceCallQueue } from '@/lib/call-queue'
 import { getInitialChatFlowMessage } from '@/lib/bot-flow'
 import { isPublicCompany } from '@/lib/public-company'
 import { createAttendanceProtocol } from '@/lib/attendance-protocol'
@@ -294,8 +293,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
         clientEmail: user.email || '',
-        status: 'waiting',
-        queuePosition: 1,
+        status: 'bot',
+        queuePosition: null,
         callBotGreeting: company.settings?.callBotGreeting || company.botGreeting || '',
         callBotOptions: company.settings?.callBotOptions || company.uraOptions || [],
         callBotVoice: company.settings?.callBotVoice || 'pt-BR',
@@ -312,19 +311,17 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         companyLogoURL: company.logoURL || '',
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
-        status: 'waiting',
-        queuePosition: 1,
+        status: 'bot',
+        queuePosition: null,
         recordingRequired: true,
         recordingStatus: 'pending',
         createdAt: serverTimestamp(),
       })
 
-      await rebalanceCallQueue(company.id)
-
       await createNotification({
         recipientCompanyId: company.id,
-        title: 'Nova ligação aguardando',
-        body: `${userData?.fullName || user.displayName || 'Cliente'} iniciou a ligação ${protocolo}.`,
+        title: 'Nova ligação iniciada',
+        body: `${userData?.fullName || user.displayName || 'Cliente'} iniciou a ligação ${protocolo} com o BOT.`,
         type: 'call',
         actionUrl: '/dashboard/telephony',
         entityId: callId,

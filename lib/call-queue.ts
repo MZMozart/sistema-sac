@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
+import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 
 function toDateValue(value: any) {
@@ -12,13 +12,38 @@ function toDateValue(value: any) {
 export async function rebalanceCallQueue(companyId: string) {
   const snapshot = await getDocs(query(collection(db, 'call_sessions'), where('companyId', '==', companyId)))
   const rows = snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
+  const activeLimit = Date.now() - 45000
 
-  // A fila considera apenas ligacoes aguardando atendimento e preserva a ordem de chegada.
+  const staleWaitingCalls = rows.filter((call) => {
+    if (call.status !== 'waiting') return false
+    if (call.clientConnected === false) return true
+    if (!call.clientHeartbeatAt) return false
+    return toDateValue(call.clientHeartbeatAt).getTime() < activeLimit
+  })
+
+  // A fila considera apenas ligacoes aguardando atendimento com cliente ativo e preserva a ordem de chegada.
   const waitingCalls = rows
-    .filter((call) => call.status === 'waiting')
+    .filter((call) => call.status === 'waiting' && !staleWaitingCalls.some((stale) => stale.id === call.id))
     .sort((a, b) => toDateValue(a.createdAt).getTime() - toDateValue(b.createdAt).getTime())
 
   const updates: Promise<void>[] = []
+
+  staleWaitingCalls.forEach((call) => {
+    updates.push(updateDoc(doc(db, 'call_sessions', call.id), {
+      status: 'ended',
+      queuePosition: null,
+      endedAt: serverTimestamp(),
+      closedBy: 'queue_cleanup',
+      updatedAt: serverTimestamp(),
+    }))
+    updates.push(updateDoc(doc(db, 'calls', call.callId || call.id), {
+      status: 'ended',
+      queuePosition: null,
+      endedAt: serverTimestamp(),
+      closedBy: 'queue_cleanup',
+      updatedAt: serverTimestamp(),
+    }))
+  })
 
   waitingCalls.forEach((call, index) => {
     if (call.queuePosition !== index + 1) {

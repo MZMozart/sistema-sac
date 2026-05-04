@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
+import { rebalanceCallQueue } from '@/lib/call-queue'
 import { ArrowLeft, Loader2, Phone } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -31,6 +32,7 @@ export default function ClientCallPage() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [mobileKeypadOpen, setMobileKeypadOpen] = useState(false)
   const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
+  const [pendingHumanConfirmation, setPendingHumanConfirmation] = useState<any | null>(null)
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
   const speakingRef = useRef(false)
@@ -74,6 +76,22 @@ export default function ClientCallPage() {
 
     loadExistingRating()
   }, [id, user?.uid])
+
+  useEffect(() => {
+    if (!session?.id || !user?.uid || ['ended', 'completed'].includes(session.status)) return
+    const updateHeartbeat = () => {
+      const payload = {
+        clientHeartbeatAt: serverTimestamp(),
+        clientConnected: true,
+        updatedAt: serverTimestamp(),
+      }
+      setDoc(doc(db, 'call_sessions', id), payload, { merge: true }).catch(() => null)
+      setDoc(doc(db, 'calls', session.callId || id), payload, { merge: true }).catch(() => null)
+    }
+    updateHeartbeat()
+    const timer = window.setInterval(updateHeartbeat, 15000)
+    return () => window.clearInterval(timer)
+  }, [id, session?.id, session?.callId, session?.status, user?.uid])
 
   const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || session?.callBotGreeting || '', [company, session?.callBotGreeting])
   const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || session?.callBotOptions || [], [company, session?.callBotOptions])
@@ -130,13 +148,18 @@ export default function ClientCallPage() {
   }
 
   const fallbackSpeakText = (text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text.trim()) return
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text.slice(0, 900))
-    utterance.lang = 'pt-BR'
-    utterance.volume = botVoiceVolume
-    utterance.rate = Number(company?.settings?.callBotVoiceSpeed || 1)
-    window.speechSynthesis.speak(utterance)
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text.trim()) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      window.speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(text.slice(0, 900))
+      utterance.lang = 'pt-BR'
+      utterance.volume = botVoiceVolume
+      utterance.rate = Number(company?.settings?.callBotVoiceSpeed || 1)
+      utterance.onend = () => resolve()
+      utterance.onerror = () => resolve()
+      window.speechSynthesis.speak(utterance)
+      window.setTimeout(resolve, Math.max(2500, Math.min(14000, text.length * 70)))
+    })
   }
 
   const speakText = async (text: string) => {
@@ -144,7 +167,7 @@ export default function ClientCallPage() {
     if (!cleanText || speakingRef.current) return
     speakingRef.current = true
     if (process.env.NEXT_PUBLIC_ENABLE_OPENAI_TTS !== 'true') {
-      fallbackSpeakText(cleanText)
+      await fallbackSpeakText(cleanText)
       speakingRef.current = false
       return
     }
@@ -162,7 +185,7 @@ export default function ClientCallPage() {
       })
 
       if (!response.ok) {
-        fallbackSpeakText(cleanText)
+        await fallbackSpeakText(cleanText)
         speakingRef.current = false
         return
       }
@@ -191,11 +214,11 @@ export default function ClientCallPage() {
         })
       } else {
         URL.revokeObjectURL(audioUrl)
-        fallbackSpeakText(cleanText)
+        await fallbackSpeakText(cleanText)
         speakingRef.current = false
       }
     } catch {
-      fallbackSpeakText(cleanText)
+      await fallbackSpeakText(cleanText)
       speakingRef.current = false
     }
   }
@@ -230,12 +253,109 @@ export default function ClientCallPage() {
     }
   }, [])
 
+  const enterHumanQueue = async (option: any) => {
+    if (!session) return
+    const optionDigit = String(option?.digit || '')
+    const optionLabel = option?.label || option?.actionLabel || option?.description || (optionDigit ? `Opção ${optionDigit}` : 'Atendimento humano')
+    const queueReason = optionLabel || 'Atendimento humano'
+
+    await setDoc(doc(db, 'call_sessions', id), {
+      status: 'waiting',
+      queuePosition: 9999,
+      selectedOptionDigit: optionDigit || null,
+      selectedOptionLabel: queueReason,
+      selectedOptionDescription: option?.speech || option?.description || queueReason,
+      queueReason,
+      requestedHumanAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    await setDoc(doc(db, 'calls', session.callId || id), {
+      status: 'waiting',
+      queuePosition: 9999,
+      selectedOptionDigit: optionDigit || null,
+      selectedOptionLabel: queueReason,
+      selectedOptionDescription: option?.speech || option?.description || queueReason,
+      queueReason,
+      requestedHumanAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    await rebalanceCallQueue(session.companyId)
+    await createNotification({
+      recipientCompanyId: session.companyId,
+      title: 'Cliente entrou na fila de ligação',
+      body: `${userData?.fullName || user?.displayName || session.clientName || 'Cliente'} pediu atendimento humano no protocolo ${session.protocolo}. Motivo: ${queueReason}.`,
+      type: 'call',
+      actionUrl: '/dashboard/telephony',
+      entityId: id,
+      entityType: 'call',
+    })
+    await createAuditLog({
+      companyId: session.companyId,
+      companyName: session.companyName,
+      protocol: session.protocolo,
+      callId: session.callId || id,
+      channel: 'call',
+      eventType: 'call_queue_entered',
+      clientId: user?.uid || session.clientId,
+      clientName: userData?.fullName || user?.displayName || session.clientName || 'Cliente',
+      summary: `Cliente entrou na fila de atendimento humano. Motivo: ${queueReason}.`,
+      metadata: { digit: optionDigit || null, label: queueReason },
+    })
+    speakText('Certo. Vou te colocar na fila para falar com um atendente. Aguarde na linha.').catch(() => null)
+  }
+
+  const finishCallByBot = async () => {
+    if (!session) return
+    await setDoc(doc(db, 'call_sessions', id), {
+      status: 'ended',
+      endedAt: serverTimestamp(),
+      closedBy: 'bot',
+      queuePosition: null,
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    await setDoc(doc(db, 'calls', session.callId || id), {
+      status: 'ended',
+      endedAt: serverTimestamp(),
+      closedBy: 'bot',
+      queuePosition: null,
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    await createAuditLog({
+      companyId: session.companyId,
+      companyName: session.companyName,
+      protocol: session.protocolo,
+      callId: session.callId || id,
+      channel: 'call',
+      eventType: 'call_bot_finished',
+      clientId: user?.uid || session.clientId,
+      clientName: userData?.fullName || user?.displayName || session.clientName || 'Cliente',
+      summary: 'BOT encerrou a ligação a pedido do cliente.',
+    })
+  }
+
   const selectCallOption = async (option: any) => {
     if (!session) return
     const optionDigit = String(option?.digit || '')
     const optionLabel = option?.label || (optionDigit ? `Tecla ${optionDigit}` : 'Opção')
     setSelectedOption(optionDigit || String(optionLabel))
     try {
+      if (pendingHumanConfirmation) {
+        if (optionDigit === '1') {
+          const selected = pendingHumanConfirmation
+          setPendingHumanConfirmation(null)
+          await enterHumanQueue(selected)
+          return
+        }
+        if (optionDigit === '2') {
+          setPendingHumanConfirmation(null)
+          await speakText('Tudo bem. Obrigado pelo contato. A ligação será encerrada.')
+          await finishCallByBot()
+          return
+        }
+        await speakText('Digite 1 para falar com um atendente ou 2 para encerrar.')
+        return
+      }
+
       const targetOption = option?.action === 'goto'
         ? callBotOptions.find((item: any) => String(item?.digit) === String(option?.targetDigit || ''))
         : null
@@ -272,19 +392,9 @@ export default function ClientCallPage() {
         },
       })
       if (option?.action === 'end') {
-        await updateDoc(doc(db, 'call_sessions', id), { status: 'ended', endedAt: serverTimestamp(), closedBy: 'client_menu' })
-        await updateDoc(doc(db, 'calls', session.callId || id), { status: 'ended', endedAt: serverTimestamp(), closedBy: 'client_menu' })
-      }
-      if (option?.action === 'transfer') {
-        await createNotification({
-          recipientCompanyId: session.companyId,
-          title: 'Ligação priorizada pela URA',
-          body: `O cliente escolheu ${option?.label || 'uma opção'} no protocolo ${session.protocolo}.`,
-          type: 'call',
-          actionUrl: '/dashboard/telephony',
-          entityId: id,
-          entityType: 'call',
-        })
+        if (spokenText) await speakText(spokenText)
+        await finishCallByBot()
+        return
       }
       if (option?.action === 'action') {
         await createNotification({
@@ -298,8 +408,10 @@ export default function ClientCallPage() {
         })
       }
       if (spokenText) {
-        speakText(spokenText).catch(() => null)
+        await speakText(spokenText)
       }
+      setPendingHumanConfirmation(targetOption || option)
+      await speakText('Deseja falar com um atendente? Digite 1 para sim ou 2 para não.')
     } catch (error) {
       console.error('Call option registration error:', error)
       toast.error('Não foi possível registrar essa opção da ligação agora.')
