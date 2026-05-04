@@ -20,7 +20,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { doc, updateDoc } from 'firebase/firestore'
-import { AlertTriangle, Bot, CheckCircle2, Link2, MessageSquare, MousePointer2, PhoneCall, Plus, Save, Trash2, Type, Workflow, Zap } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Hash, Link2, MessageSquare, MousePointer2, PhoneCall, Plus, Save, Trash2, Type, Workflow, Zap } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,7 @@ import { createDefaultCallDigits, createEmptyChatButton, createEmptyChatMessage,
 import { toast } from 'sonner'
 
 type BotSection = 'chat' | 'call'
-type VisualKind = 'chatGreeting' | 'chatButtons' | 'chatText' | 'chatAction' | 'callGreeting' | 'callMenu' | 'callText' | 'callAction'
+type VisualKind = 'chatGreeting' | 'chatButtons' | 'chatText' | 'chatAction' | 'callGreeting' | 'callDigit' | 'callMenu' | 'callText' | 'callAction'
 
 type VisualButton = ChatFlowButton & {
   description?: string
@@ -46,6 +46,7 @@ type VisualNodeData = {
   text?: string
   action?: ChatFlowButtonAction | CallDigitAction | 'repeat'
   actionLabel?: string | null
+  digit?: string
   buttons?: VisualButton[]
   options?: VisualCallOption[]
   onUpdate?: (nodeId: string, patch: Partial<VisualNodeData>) => void
@@ -66,6 +67,7 @@ function nodeTitle(kind: VisualKind) {
     chatText: 'Texto',
     chatAction: 'Ação',
     callGreeting: 'Saudação',
+    callDigit: 'Número',
     callMenu: 'Menu numérico',
     callText: 'Texto falado',
     callAction: 'Ação',
@@ -75,7 +77,7 @@ function nodeTitle(kind: VisualKind) {
 
 function nodeColor(kind: VisualKind) {
   if (kind.includes('Greeting')) return 'border-emerald-400/70 bg-emerald-500/10'
-  if (kind.includes('Buttons') || kind.includes('Menu')) return 'border-blue-400/70 bg-blue-500/10'
+  if (kind.includes('Buttons') || kind.includes('Menu') || kind.includes('Digit')) return 'border-blue-400/70 bg-blue-500/10'
   if (kind.includes('Text')) return 'border-amber-400/70 bg-amber-500/10'
   return 'border-rose-400/70 bg-rose-500/10'
 }
@@ -112,6 +114,13 @@ function createVisualNode(kind: VisualKind, position = { x: 120, y: 120 }): Node
   if (kind === 'callGreeting') {
     base.data.text = 'Olá, bem-vindo. Digite uma das opções para continuar.'
   }
+  if (kind === 'callDigit') {
+    base.data.digit = '1'
+    base.data.title = 'Tecla 1'
+    base.data.text = 'Você escolheu a opção 1.'
+    base.data.action = 'info'
+    base.data.actionLabel = 'Opção 1'
+  }
   if (kind === 'callMenu') {
     base.data.options = createDefaultCallDigits().map((item) => ({
       ...item,
@@ -140,7 +149,7 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
   }
 
   const canReceive = !data.kind.includes('Greeting')
-  const hasDefaultOutput = ['chatGreeting', 'chatText', 'chatAction', 'callGreeting', 'callText', 'callAction'].includes(data.kind)
+  const hasDefaultOutput = ['chatGreeting', 'chatText', 'chatAction', 'callGreeting', 'callDigit', 'callText', 'callAction'].includes(data.kind)
   const isChatAction = data.kind === 'chatAction'
   const isCallAction = data.kind === 'callAction'
 
@@ -163,7 +172,7 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
       </div>
 
       <div className="space-y-3 p-3">
-        {['chatGreeting', 'chatButtons', 'chatText', 'callGreeting', 'callText'].includes(data.kind) ? (
+        {['chatGreeting', 'chatButtons', 'chatText', 'callGreeting', 'callText', 'callDigit'].includes(data.kind) ? (
           <div className="space-y-2">
             <Label>{data.kind.startsWith('call') ? 'Texto falado pelo BOT' : 'Texto da mensagem'}</Label>
             <Textarea
@@ -172,6 +181,50 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
               maxLength={2500}
               className="nodrag min-h-[96px] resize-none text-sm"
             />
+          </div>
+        ) : null}
+
+        {data.kind === 'callDigit' ? (
+          <div className="space-y-3 rounded-lg border border-border bg-card/70 p-3">
+            <div className="grid grid-cols-[86px_1fr] gap-2">
+              <div className="space-y-2">
+                <Label>Número</Label>
+                <select
+                  value={data.digit || '1'}
+                  onChange={(event) => update({ digit: event.target.value, title: `Tecla ${event.target.value}` })}
+                  className="nodrag h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {['1','2','3','4','5','6','7','8','9','0'].map((digit) => (
+                    <option key={digit} value={digit}>{digit}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>O que essa tecla representa</Label>
+                <Input
+                  value={data.actionLabel || ''}
+                  onChange={(event) => update({ actionLabel: event.target.value })}
+                  className="nodrag"
+                  placeholder="Ex: Financeiro"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>O que deve acontecer</Label>
+              <select
+                value={String(data.action || 'info')}
+                onChange={(event) => update({ action: event.target.value as any })}
+                className="nodrag h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="info">Falar texto e continuar</option>
+                <option value="transfer">Falar com atendente</option>
+                <option value="end">Encerrar ligação</option>
+                <option value="repeat">Repetir opções disponíveis</option>
+                <option value="goto">Ir para outro fluxo conectado</option>
+                <option value="action">Executar ação interna</option>
+              </select>
+            </div>
+            <p className="text-xs text-muted-foreground">Você pode repetir o mesmo número em outros pontos do fluxo. O sistema considera o contexto atual da ligação.</p>
           </div>
         ) : null}
 
@@ -329,16 +382,56 @@ function createDefaultCallVisualFlow(greeting: string, digits: CallDigitConfig[]
   const greetingNode: Node<VisualNodeData> = {
     id: createId('call-greeting'),
     type: 'visual',
-    position: { x: 120, y: 160 },
+    position: { x: 80, y: 220 },
     data: { kind: 'callGreeting', title: 'Saudação', text: greeting || 'Olá, bem-vindo. Digite uma das opções para continuar.' },
   }
-  const menuNode: Node<VisualNodeData> = {
-    id: createId('call-menu'),
+  const digitNodes: Node<VisualNodeData>[] = (digits.length ? digits : createDefaultCallDigits()).map((digit, index) => ({
+    id: createId(`call-digit-${digit.digit}`),
     type: 'visual',
-    position: { x: 560, y: 90 },
-    data: { kind: 'callMenu', title: 'Menu numérico', options: digits.length ? digits : createDefaultCallDigits() },
+    position: { x: 520 + (index % 2) * 380, y: 40 + Math.floor(index / 2) * 260 },
+    data: {
+      kind: 'callDigit',
+      title: `Tecla ${digit.digit}`,
+      digit: digit.digit,
+      text: digit.speech,
+      action: digit.action,
+      actionLabel: digit.label,
+    },
+  }))
+  return {
+    nodes: [greetingNode, ...digitNodes],
+    edges: digitNodes.map((node) => createVisualEdge(greetingNode.id, node.id)),
   }
-  return { nodes: [greetingNode, menuNode], edges: [createVisualEdge(greetingNode.id, menuNode.id)] }
+}
+
+function normalizeCallVisualFlow(flow: { nodes?: Node<VisualNodeData>[]; edges?: Edge[] }, fallbackGreeting: string, fallbackDigits: CallDigitConfig[]) {
+  const rawNodes = flow.nodes || []
+  const rawEdges = flow.edges || []
+  const menuNode = rawNodes.find((node) => node.data.kind === 'callMenu')
+  if (!menuNode) return { nodes: rawNodes, edges: rawEdges }
+
+  const digitNodes: Node<VisualNodeData>[] = (menuNode.data.options?.length ? menuNode.data.options : fallbackDigits).map((digit, index) => ({
+    id: createId(`call-digit-${digit.digit}`),
+    type: 'visual',
+    position: { x: menuNode.position.x + (index % 2) * 380, y: menuNode.position.y + Math.floor(index / 2) * 250 },
+    data: {
+      kind: 'callDigit',
+      title: `Tecla ${digit.digit}`,
+      digit: digit.digit,
+      text: digit.speech,
+      action: digit.action,
+      actionLabel: digit.label,
+    },
+  }))
+  const incomingEdges = rawEdges.filter((edge) => edge.target === menuNode.id)
+  const convertedIncoming = incomingEdges.flatMap((edge) => digitNodes.map((digitNode) => createVisualEdge(edge.source, digitNode.id, edge.sourceHandle)))
+  const keptNodes = rawNodes.filter((node) => node.id !== menuNode.id)
+  const keptEdges = rawEdges.filter((edge) => edge.source !== menuNode.id && edge.target !== menuNode.id)
+  if (!keptNodes.some((node) => node.data.kind === 'callGreeting')) {
+    const defaultFlow = createDefaultCallVisualFlow(fallbackGreeting, fallbackDigits)
+    return defaultFlow
+  }
+  return { nodes: [...keptNodes, ...digitNodes], edges: [...keptEdges, ...convertedIncoming] }
 }
 
 function createVisualEdge(source: string, target: string, sourceHandle?: string | null): Edge {
@@ -400,6 +493,17 @@ function buildChatMessages(nodes: Node<VisualNodeData>[], edges: Edge[]): ChatFl
 }
 
 function buildCallDigits(nodes: Node<VisualNodeData>[], edges: Edge[]): CallDigitConfig[] {
+  const digitNodes = nodes.filter((node) => node.data.kind === 'callDigit')
+  if (digitNodes.length) {
+    return digitNodes.map((node) => ({
+      digit: node.data.digit || '1',
+      label: node.data.actionLabel || node.data.title || `Opção ${node.data.digit || '1'}`,
+      speech: node.data.text || `Você selecionou a opção ${node.data.digit || '1'}.`,
+      action: node.data.action === 'repeat' ? 'goto' : ((node.data.action || 'info') as CallDigitAction),
+      targetDigit: null,
+      actionLabel: node.data.actionLabel || node.data.title || null,
+    }))
+  }
   const menu = nodes.find((node) => node.data.kind === 'callMenu')
   const options = menu?.data.options?.length ? menu.data.options : createDefaultCallDigits()
   return options.map((option) => {
@@ -458,7 +562,10 @@ function validateFlow(section: BotSection, nodes: Node<VisualNodeData>[], edges:
   }
   const missingButtonTarget = nodes.some((node) => node.data.kind === 'chatButtons' && (node.data.buttons || []).some((button) => !findTarget(edges, node.id, `button:${button.id}`) && button.action === 'goto'))
   if (missingButtonTarget) return 'Todo botão configurado como "Ir para outro fluxo" precisa estar conectado a outro card.'
-  const missingDigitTarget = nodes.some((node) => node.data.kind === 'callMenu' && (node.data.options || []).some((option) => option.action === 'goto' && !findTarget(edges, node.id, `digit:${option.digit}`)))
+  const missingDigitTarget = nodes.some((node) => (
+    (node.data.kind === 'callMenu' && (node.data.options || []).some((option) => option.action === 'goto' && !findTarget(edges, node.id, `digit:${option.digit}`))) ||
+    (node.data.kind === 'callDigit' && node.data.action === 'goto' && !findTarget(edges, node.id))
+  ))
   if (missingDigitTarget) return 'Toda opção numérica configurada como "Ir para outro fluxo" precisa estar conectada.'
   if (hasCycle(nodes, edges)) return 'O fluxo possui loop. Remova a conexão circular antes de salvar.'
   return null
@@ -522,7 +629,9 @@ export default function BotPage() {
     if (!company) return
     setBotName(company.botName || 'AtendePro BOT')
     const chatFlow = company.settings?.visualBotFlows?.chat || createDefaultChatVisualFlow(parseChatFlow(company.settings?.chatBotFlowMessages))
-    const callFlow = company.settings?.visualBotFlows?.call || createDefaultCallVisualFlow(company.settings?.callBotGreeting || 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.', parseCallDigits(company.settings?.callBotOptions))
+    const callGreeting = company.settings?.callBotGreeting || 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.'
+    const callDigits = parseCallDigits(company.settings?.callBotOptions)
+    const callFlow = normalizeCallVisualFlow(company.settings?.visualBotFlows?.call || createDefaultCallVisualFlow(callGreeting, callDigits), callGreeting, callDigits)
     setChatNodes(applyNodeHandlers(chatFlow.nodes || [], updateNode, removeNode))
     setChatEdges(chatFlow.edges || [])
     setCallNodes(applyNodeHandlers(callFlow.nodes || [], updateNode, removeNode))
@@ -572,7 +681,7 @@ export default function BotPage() {
       ]
     : [
         { kind: 'callGreeting' as VisualKind, title: 'Saudação', description: 'Áudio inicial falado por TTS.', icon: Bot },
-        { kind: 'callMenu' as VisualKind, title: 'Menu numérico', description: 'DTMF com teclas de 0 a 9.', icon: PhoneCall },
+        { kind: 'callDigit' as VisualKind, title: 'Número DTMF', description: 'Tecla isolada, repetível e conectável.', icon: Hash },
         { kind: 'callText' as VisualKind, title: 'Texto falado', description: 'Informação convertida em voz.', icon: Type },
         { kind: 'callAction' as VisualKind, title: 'Ações', description: 'Atendente, encerrar ou repetir.', icon: Zap },
       ]
@@ -718,7 +827,7 @@ export default function BotPage() {
                 <Link2 className="h-4 w-4" />
                 Conexões
               </div>
-              Cards possuem entrada à esquerda e saídas à direita. Botões e números criam uma saída individual para cada opção.
+              Cards possuem entrada à esquerda e saídas à direita. Na ligação, cada número é um card separado e pode aparecer mais de uma vez em contextos diferentes.
             </div>
           </div>
         </aside>

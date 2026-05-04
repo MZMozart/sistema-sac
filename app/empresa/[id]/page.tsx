@@ -297,6 +297,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         queuePosition: null,
         callBotGreeting: company.settings?.callBotGreeting || company.botGreeting || '',
         callBotOptions: company.settings?.callBotOptions || company.uraOptions || [],
+        callVisualFlow: company.settings?.visualBotFlows?.call || null,
         callBotVoice: company.settings?.callBotVoice || 'pt-BR',
         recordingRequired: true,
         recordingStatus: 'pending',

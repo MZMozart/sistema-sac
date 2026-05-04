@@ -33,6 +33,7 @@ export default function ClientCallPage() {
   const [mobileKeypadOpen, setMobileKeypadOpen] = useState(false)
   const [mobileCallPanel, setMobileCallPanel] = useState<'call' | 'chat'>('call')
   const [pendingHumanConfirmation, setPendingHumanConfirmation] = useState<any | null>(null)
+  const [currentVisualCallNodeId, setCurrentVisualCallNodeId] = useState<string | null>(null)
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
   const speakingRef = useRef(false)
@@ -93,8 +94,29 @@ export default function ClientCallPage() {
     return () => window.clearInterval(timer)
   }, [id, session?.id, session?.callId, session?.status, user?.uid])
 
-  const callBotGreeting = useMemo(() => company?.settings?.callBotGreeting || company?.botGreeting || session?.callBotGreeting || '', [company, session?.callBotGreeting])
-  const callBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || session?.callBotOptions || [], [company, session?.callBotOptions])
+  const callVisualFlow = useMemo(() => company?.settings?.visualBotFlows?.call || session?.callVisualFlow || null, [company?.settings?.visualBotFlows?.call, session?.callVisualFlow])
+  const visualCallNodes = useMemo(() => Array.isArray(callVisualFlow?.nodes) ? callVisualFlow.nodes : [], [callVisualFlow])
+  const visualCallEdges = useMemo(() => Array.isArray(callVisualFlow?.edges) ? callVisualFlow.edges : [], [callVisualFlow])
+  const callGreetingNode = useMemo(() => visualCallNodes.find((node: any) => node?.data?.kind === 'callGreeting') || null, [visualCallNodes])
+  const currentVisualCallNode = useMemo(() => visualCallNodes.find((node: any) => node?.id === currentVisualCallNodeId) || callGreetingNode || null, [callGreetingNode, currentVisualCallNodeId, visualCallNodes])
+  const visualCallOptions = useMemo(() => {
+    if (!currentVisualCallNode) return []
+    return visualCallEdges
+      .filter((edge: any) => edge?.source === currentVisualCallNode.id)
+      .map((edge: any) => visualCallNodes.find((node: any) => node?.id === edge.target && node?.data?.kind === 'callDigit'))
+      .filter(Boolean)
+      .map((node: any) => ({
+        digit: String(node.data?.digit || '1'),
+        label: node.data?.actionLabel || node.data?.title || `Opção ${node.data?.digit || '1'}`,
+        speech: node.data?.text || `Você selecionou a opção ${node.data?.digit || '1'}.`,
+        action: node.data?.action || 'info',
+        actionLabel: node.data?.actionLabel || node.data?.title || null,
+        visualNodeId: node.id,
+      }))
+  }, [currentVisualCallNode, visualCallEdges, visualCallNodes])
+  const legacyCallBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || session?.callBotOptions || [], [company, session?.callBotOptions])
+  const callBotOptions = useMemo(() => visualCallOptions.length ? visualCallOptions : legacyCallBotOptions, [legacyCallBotOptions, visualCallOptions])
+  const callBotGreeting = useMemo(() => callGreetingNode?.data?.text || company?.settings?.callBotGreeting || company?.botGreeting || session?.callBotGreeting || '', [callGreetingNode, company, session?.callBotGreeting])
   const callBotSpeech = useMemo(() => {
     const intro = callBotGreeting || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
     const optionsText = callBotOptions
@@ -103,6 +125,11 @@ export default function ClientCallPage() {
       .join(' ')
     return [intro, optionsText].filter(Boolean).join(' ')
   }, [callBotGreeting, callBotOptions, session?.companyName])
+
+  useEffect(() => {
+    if (!callGreetingNode?.id) return
+    setCurrentVisualCallNodeId((current) => current || callGreetingNode.id)
+  }, [callGreetingNode?.id])
   const botVoiceVolume = useMemo(() => {
     const configuredVolume = Number(company?.settings?.audioSettings?.botVoiceVolume ?? 100)
     return Math.max(0, Math.min(1, configuredVolume / 100))
@@ -166,13 +193,8 @@ export default function ClientCallPage() {
     const cleanText = text.trim()
     if (!cleanText || speakingRef.current) return
     speakingRef.current = true
-    if (process.env.NEXT_PUBLIC_ENABLE_OPENAI_TTS !== 'true') {
-      await fallbackSpeakText(cleanText)
-      speakingRef.current = false
-      return
-    }
     try {
-      // A voz da URA usa o texto configurado nos botões para o cliente ouvir durante a ligação.
+      // A voz da URA tenta usar OpenAI TTS; se a chave nao estiver configurada, cai para a voz do navegador.
       const response = await fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -333,12 +355,150 @@ export default function ClientCallPage() {
     })
   }
 
+  const announceVisualOptions = async (nodeId?: string | null) => {
+    if (!nodeId) return
+    const available = visualCallEdges
+      .filter((edge: any) => edge?.source === nodeId)
+      .map((edge: any) => visualCallNodes.find((node: any) => node?.id === edge.target && node?.data?.kind === 'callDigit'))
+      .filter(Boolean)
+
+    if (!available.length) return
+    const text = available
+      .map((node: any) => `Digite ${node.data?.digit || ''} para ${node.data?.actionLabel || node.data?.title || 'continuar'}.`)
+      .join(' ')
+    await speakText(text)
+  }
+
+  const executeVisualTarget = async (targetNode: any, originOption: any) => {
+    if (!targetNode) {
+      await announceVisualOptions(currentVisualCallNode?.id || callGreetingNode?.id)
+      return
+    }
+
+    if (targetNode.data?.kind === 'callText') {
+      setCurrentVisualCallNodeId(targetNode.id)
+      if (targetNode.data?.text) await speakText(targetNode.data.text)
+      await announceVisualOptions(targetNode.id)
+      return
+    }
+
+    if (targetNode.data?.kind === 'callAction') {
+      const action = targetNode.data?.action || 'transfer'
+      const actionOption = {
+        ...originOption,
+        action,
+        label: targetNode.data?.actionLabel || targetNode.data?.title || originOption.label,
+        actionLabel: targetNode.data?.actionLabel || targetNode.data?.title || originOption.actionLabel,
+      }
+      if (action === 'transfer') {
+        await enterHumanQueue(actionOption)
+        return
+      }
+      if (action === 'end') {
+        if (targetNode.data?.actionLabel) await speakText(targetNode.data.actionLabel)
+        await finishCallByBot()
+        return
+      }
+      if (action === 'repeat') {
+        await announceVisualOptions(currentVisualCallNode?.id || callGreetingNode?.id)
+        return
+      }
+      if (targetNode.data?.actionLabel) await speakText(targetNode.data.actionLabel)
+      await announceVisualOptions(targetNode.id)
+      return
+    }
+
+    if (targetNode.data?.kind === 'callGreeting') {
+      setCurrentVisualCallNodeId(targetNode.id)
+      if (targetNode.data?.text) await speakText(targetNode.data.text)
+      await announceVisualOptions(targetNode.id)
+      return
+    }
+
+    if (targetNode.data?.kind === 'callDigit') {
+      setCurrentVisualCallNodeId(currentVisualCallNode?.id || callGreetingNode?.id || null)
+      await handleVisualCallOption({
+        digit: String(targetNode.data?.digit || ''),
+        label: targetNode.data?.actionLabel || targetNode.data?.title,
+        speech: targetNode.data?.text,
+        action: targetNode.data?.action || 'info',
+        actionLabel: targetNode.data?.actionLabel || targetNode.data?.title,
+        visualNodeId: targetNode.id,
+      })
+    }
+  }
+
+  const handleVisualCallOption = async (option: any) => {
+    if (!session) return false
+    const digitNode = visualCallNodes.find((node: any) => node?.id === option.visualNodeId)
+    if (!digitNode) return false
+    const optionDigit = String(option?.digit || digitNode.data?.digit || '')
+    const optionLabel = option?.label || digitNode.data?.actionLabel || digitNode.data?.title || `Tecla ${optionDigit}`
+    const spokenText = option?.speech || digitNode.data?.text || `Você selecionou a opção ${optionDigit}.`
+
+    await updateDoc(doc(db, 'call_sessions', id), {
+      selectedOptionDigit: optionDigit || null,
+      selectedOptionLabel: optionLabel || null,
+      selectedOptionDescription: spokenText || null,
+      selectedOptionAt: serverTimestamp(),
+      currentVisualCallNodeId: digitNode.id,
+    })
+    await setDoc(doc(db, 'calls', session.callId || id), {
+      selectedOptionDigit: optionDigit || null,
+      selectedOptionLabel: optionLabel || null,
+      selectedOptionDescription: spokenText || null,
+      selectedOptionAt: serverTimestamp(),
+      currentVisualCallNodeId: digitNode.id,
+    }, { merge: true })
+    await createAuditLog({
+      companyId: session.companyId,
+      companyName: session.companyName,
+      protocol: session.protocolo,
+      callId: session.callId || id,
+      channel: 'call',
+      eventType: 'call_menu_selected',
+      clientId: user?.uid || session.clientId,
+      clientName: userData?.fullName || user?.displayName || session.clientName || 'Cliente',
+      employeeId: session.employeeId || null,
+      employeeName: session.employeeName || null,
+      summary: `Cliente selecionou a tecla ${optionDigit || '-'} no fluxo visual da ligação.`,
+      metadata: { digit: optionDigit || null, label: optionLabel || null, action: digitNode.data?.action || null, visualNodeId: digitNode.id },
+    })
+
+    if (spokenText) await speakText(spokenText)
+
+    const targetId = visualCallEdges.find((edge: any) => edge?.source === digitNode.id)?.target
+    const targetNode = visualCallNodes.find((node: any) => node?.id === targetId)
+    if (targetNode) {
+      await executeVisualTarget(targetNode, { ...option, label: optionLabel, speech: spokenText })
+      return true
+    }
+
+    const action = digitNode.data?.action || option.action || 'info'
+    if (action === 'transfer') {
+      await enterHumanQueue({ ...option, label: optionLabel, speech: spokenText, action: 'transfer' })
+      return true
+    }
+    if (action === 'end') {
+      await finishCallByBot()
+      return true
+    }
+    if (action === 'repeat') {
+      await announceVisualOptions(currentVisualCallNode?.id || callGreetingNode?.id)
+      return true
+    }
+    await announceVisualOptions(currentVisualCallNode?.id || callGreetingNode?.id)
+    return true
+  }
+
   const selectCallOption = async (option: any) => {
     if (!session) return
     const optionDigit = String(option?.digit || '')
     const optionLabel = option?.label || (optionDigit ? `Tecla ${optionDigit}` : 'Opção')
     setSelectedOption(optionDigit || String(optionLabel))
     try {
+      if (option?.visualNodeId && await handleVisualCallOption(option)) return
+
       if (pendingHumanConfirmation) {
         if (optionDigit === '1') {
           const selected = pendingHumanConfirmation
