@@ -1,7 +1,26 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  addEdge,
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Panel,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeProps,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { doc, updateDoc } from 'firebase/firestore'
+import { AlertTriangle, Bot, CheckCircle2, Link2, MessageSquare, MousePointer2, PhoneCall, Plus, Save, Trash2, Type, Workflow, Zap } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
@@ -9,129 +28,589 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { createDefaultCallDigits, createEmptyChatButton, createEmptyChatMessage, parseCallDigits, parseChatFlow, type CallDigitConfig, type ChatFlowButton, type ChatFlowMessage } from '@/lib/bot-flow'
-import { ArrowDown, ArrowUp, GripVertical, Loader2, Plus, Save, Trash2 } from 'lucide-react'
+import { createDefaultCallDigits, createEmptyChatButton, createEmptyChatMessage, parseCallDigits, parseChatFlow, type CallDigitAction, type CallDigitConfig, type ChatFlowButton, type ChatFlowButtonAction, type ChatFlowMessage } from '@/lib/bot-flow'
 import { toast } from 'sonner'
 
 type BotSection = 'chat' | 'call'
+type VisualKind = 'chatGreeting' | 'chatButtons' | 'chatText' | 'chatAction' | 'callGreeting' | 'callMenu' | 'callText' | 'callAction'
+
+type VisualButton = ChatFlowButton & {
+  description?: string
+}
+
+type VisualCallOption = CallDigitConfig
+
+type VisualNodeData = {
+  kind: VisualKind
+  title: string
+  text?: string
+  action?: ChatFlowButtonAction | CallDigitAction | 'repeat'
+  actionLabel?: string | null
+  buttons?: VisualButton[]
+  options?: VisualCallOption[]
+  onUpdate?: (nodeId: string, patch: Partial<VisualNodeData>) => void
+  onRemove?: (nodeId: string) => void
+}
+
+const nodeTypes = { visual: VisualBotNode }
+
+function createId(prefix: string) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return `${prefix}-${crypto.randomUUID()}`
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function nodeTitle(kind: VisualKind) {
+  const labels: Record<VisualKind, string> = {
+    chatGreeting: 'Saudação',
+    chatButtons: 'Botões',
+    chatText: 'Texto',
+    chatAction: 'Ação',
+    callGreeting: 'Saudação',
+    callMenu: 'Menu numérico',
+    callText: 'Texto falado',
+    callAction: 'Ação',
+  }
+  return labels[kind]
+}
+
+function nodeColor(kind: VisualKind) {
+  if (kind.includes('Greeting')) return 'border-emerald-400/70 bg-emerald-500/10'
+  if (kind.includes('Buttons') || kind.includes('Menu')) return 'border-blue-400/70 bg-blue-500/10'
+  if (kind.includes('Text')) return 'border-amber-400/70 bg-amber-500/10'
+  return 'border-rose-400/70 bg-rose-500/10'
+}
+
+function createVisualNode(kind: VisualKind, position = { x: 120, y: 120 }): Node<VisualNodeData> {
+  const id = createId(kind)
+  const base = {
+    id,
+    type: 'visual',
+    position,
+    data: {
+      kind,
+      title: nodeTitle(kind),
+    } as VisualNodeData,
+  }
+
+  if (kind === 'chatGreeting') {
+    base.data.text = 'Olá, seja bem-vindo! Como posso ajudar?'
+  }
+  if (kind === 'chatButtons') {
+    base.data.text = 'Escolha uma das opções abaixo.'
+    base.data.buttons = [
+      { ...createEmptyChatButton(), label: 'Financeiro' },
+      { ...createEmptyChatButton(), label: 'Suporte' },
+    ]
+  }
+  if (kind === 'chatText') {
+    base.data.text = 'Mensagem informativa do BOT.'
+  }
+  if (kind === 'chatAction') {
+    base.data.action = 'queue'
+    base.data.actionLabel = 'Falar com atendente'
+  }
+  if (kind === 'callGreeting') {
+    base.data.text = 'Olá, bem-vindo. Digite uma das opções para continuar.'
+  }
+  if (kind === 'callMenu') {
+    base.data.options = createDefaultCallDigits().map((item) => ({
+      ...item,
+      label: item.digit === '0' ? 'Atendente' : item.label,
+      action: item.digit === '0' ? 'transfer' : 'info',
+    }))
+  }
+  if (kind === 'callText') {
+    base.data.text = 'Informação falada pelo BOT durante a ligação.'
+  }
+  if (kind === 'callAction') {
+    base.data.action = 'transfer'
+    base.data.actionLabel = 'Falar com atendente'
+  }
+
+  return base
+}
+
+function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) {
+  const update = (patch: Partial<VisualNodeData>) => data.onUpdate?.(id, patch)
+  const updateButton = (buttonId: string, patch: Partial<VisualButton>) => {
+    update({ buttons: (data.buttons || []).map((button) => button.id === buttonId ? { ...button, ...patch } : button) })
+  }
+  const updateOption = (digit: string, patch: Partial<VisualCallOption>) => {
+    update({ options: (data.options || []).map((option) => option.digit === digit ? { ...option, ...patch } : option) })
+  }
+
+  const canReceive = !data.kind.includes('Greeting')
+  const hasDefaultOutput = ['chatGreeting', 'chatText', 'chatAction', 'callGreeting', 'callText', 'callAction'].includes(data.kind)
+  const isChatAction = data.kind === 'chatAction'
+  const isCallAction = data.kind === 'callAction'
+
+  return (
+    <div className={`w-[330px] rounded-xl border-2 bg-background shadow-xl ${nodeColor(data.kind)} ${selected ? 'ring-2 ring-primary' : ''}`}>
+      {canReceive ? <Handle type="target" position={Position.Left} className="!h-3 !w-3 !border-2 !border-background !bg-primary" /> : null}
+
+      <div className="flex items-start justify-between gap-3 border-b border-border/70 p-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{data.kind.startsWith('call') ? 'Ligação' : 'Chat'}</p>
+          <Input
+            value={data.title}
+            onChange={(event) => update({ title: event.target.value })}
+            className="nodrag mt-1 h-8 border-0 bg-transparent px-0 text-base font-bold shadow-none focus-visible:ring-0"
+          />
+        </div>
+        <Button type="button" variant="ghost" size="icon" className="nodrag h-8 w-8" onClick={() => data.onRemove?.(id)}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="space-y-3 p-3">
+        {['chatGreeting', 'chatButtons', 'chatText', 'callGreeting', 'callText'].includes(data.kind) ? (
+          <div className="space-y-2">
+            <Label>{data.kind.startsWith('call') ? 'Texto falado pelo BOT' : 'Texto da mensagem'}</Label>
+            <Textarea
+              value={data.text || ''}
+              onChange={(event) => update({ text: event.target.value })}
+              maxLength={2500}
+              className="nodrag min-h-[96px] resize-none text-sm"
+            />
+          </div>
+        ) : null}
+
+        {data.kind === 'chatButtons' ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Botões</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="nodrag h-8"
+                onClick={() => update({ buttons: [...(data.buttons || []), createEmptyChatButton()] })}
+              >
+                <Plus className="mr-1 h-3 w-3" />
+                Botão
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {(data.buttons || []).map((button) => (
+                <div key={button.id} className="relative rounded-lg border border-border bg-card/70 p-2 pr-5">
+                  <Input
+                    value={button.label}
+                    onChange={(event) => updateButton(button.id, { label: event.target.value })}
+                    className="nodrag h-8 text-sm"
+                    placeholder="Texto do botão"
+                  />
+                  <select
+                    value={button.action}
+                    onChange={(event) => updateButton(button.id, { action: event.target.value as ChatFlowButtonAction })}
+                    className="nodrag mt-2 h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    <option value="goto">Ir para outro fluxo</option>
+                    <option value="queue">Falar com atendente</option>
+                    <option value="close">Encerrar conversa</option>
+                    <option value="action">Executar ação</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="nodrag absolute right-1 top-1 rounded p-1 text-muted-foreground hover:text-destructive"
+                    onClick={() => update({ buttons: (data.buttons || []).filter((item) => item.id !== button.id) })}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                  <Handle id={`button:${button.id}`} type="source" position={Position.Right} className="!right-[-7px] !h-3 !w-3 !border-2 !border-background !bg-blue-500" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {data.kind === 'callMenu' ? (
+          <div className="space-y-2">
+            <Label>Opções DTMF 0-9</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(data.options || []).map((option) => (
+                <div key={option.digit} className="relative rounded-lg border border-border bg-card/70 p-2 pr-5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">{option.digit}</span>
+                    <Input value={option.label} onChange={(event) => updateOption(option.digit, { label: event.target.value })} className="nodrag h-8 text-xs" />
+                  </div>
+                  <Textarea value={option.speech} onChange={(event) => updateOption(option.digit, { speech: event.target.value })} className="nodrag min-h-[70px] resize-none text-xs" />
+                  <select
+                    value={option.action}
+                    onChange={(event) => updateOption(option.digit, { action: event.target.value as CallDigitAction })}
+                    className="nodrag mt-2 h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    <option value="info">Ler informação</option>
+                    <option value="transfer">Falar com atendente</option>
+                    <option value="end">Encerrar ligação</option>
+                    <option value="goto">Ir para outro fluxo</option>
+                    <option value="action">Executar ação</option>
+                  </select>
+                  <Handle id={`digit:${option.digit}`} type="source" position={Position.Right} className="!right-[-7px] !h-3 !w-3 !border-2 !border-background !bg-blue-500" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {isChatAction || isCallAction ? (
+          <div className="space-y-2">
+            <Label>Tipo de ação</Label>
+            <select
+              value={String(data.action || (isChatAction ? 'queue' : 'transfer'))}
+              onChange={(event) => update({ action: event.target.value as any })}
+              className="nodrag h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {isChatAction ? (
+                <>
+                  <option value="queue">Falar com atendente</option>
+                  <option value="close">Encerrar conversa</option>
+                  <option value="goto">Ir para outro fluxo</option>
+                  <option value="action">Abrir link / ação</option>
+                </>
+              ) : (
+                <>
+                  <option value="transfer">Falar com atendente</option>
+                  <option value="end">Encerrar ligação</option>
+                  <option value="repeat">Repetir menu</option>
+                  <option value="goto">Ir para outro fluxo</option>
+                  <option value="action">Abrir link / ação</option>
+                </>
+              )}
+            </select>
+            <Input
+              value={data.actionLabel || ''}
+              onChange={(event) => update({ actionLabel: event.target.value })}
+              className="nodrag"
+              placeholder="Descrição interna da ação"
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {hasDefaultOutput ? <Handle type="source" position={Position.Right} className="!h-3 !w-3 !border-2 !border-background !bg-primary" /> : null}
+    </div>
+  )
+}
+
+function applyNodeHandlers(nodes: Node<VisualNodeData>[], onUpdate: VisualNodeData['onUpdate'], onRemove: VisualNodeData['onRemove']) {
+  return nodes.map((node) => ({ ...node, data: { ...node.data, onUpdate, onRemove } }))
+}
+
+function createDefaultChatVisualFlow(messages: ChatFlowMessage[]) {
+  const baseMessages = messages.length ? messages : [createEmptyChatMessage(1)]
+  const nodes: Node<VisualNodeData>[] = baseMessages.map((message, index) => ({
+    id: message.id,
+    type: 'visual',
+    position: { x: 120 + index * 420, y: index % 2 ? 380 : 120 },
+    data: {
+      kind: index === 0 ? 'chatGreeting' : message.buttons.length ? 'chatButtons' : 'chatText',
+      title: index === 0 ? 'Saudação' : message.title,
+      text: message.text,
+      buttons: index === 0 ? undefined : message.buttons,
+    },
+  }))
+  const edges: Edge[] = []
+  baseMessages.forEach((message) => {
+    message.buttons.forEach((button) => {
+      if (button.action === 'goto' && button.targetMessageId) {
+        edges.push(createVisualEdge(message.id, button.targetMessageId, `button:${button.id}`))
+      }
+    })
+  })
+  if (nodes.length > 1 && edges.length === 0) {
+    for (let index = 0; index < nodes.length - 1; index += 1) {
+      edges.push(createVisualEdge(nodes[index].id, nodes[index + 1].id))
+    }
+  }
+  return { nodes, edges }
+}
+
+function createDefaultCallVisualFlow(greeting: string, digits: CallDigitConfig[]) {
+  const greetingNode: Node<VisualNodeData> = {
+    id: createId('call-greeting'),
+    type: 'visual',
+    position: { x: 120, y: 160 },
+    data: { kind: 'callGreeting', title: 'Saudação', text: greeting || 'Olá, bem-vindo. Digite uma das opções para continuar.' },
+  }
+  const menuNode: Node<VisualNodeData> = {
+    id: createId('call-menu'),
+    type: 'visual',
+    position: { x: 560, y: 90 },
+    data: { kind: 'callMenu', title: 'Menu numérico', options: digits.length ? digits : createDefaultCallDigits() },
+  }
+  return { nodes: [greetingNode, menuNode], edges: [createVisualEdge(greetingNode.id, menuNode.id)] }
+}
+
+function createVisualEdge(source: string, target: string, sourceHandle?: string | null): Edge {
+  return {
+    id: createId('edge'),
+    source,
+    target,
+    sourceHandle: sourceHandle || null,
+    type: 'smoothstep',
+    animated: true,
+    markerEnd: { type: MarkerType.ArrowClosed },
+  }
+}
+
+function stripHandlers(nodes: Node<VisualNodeData>[]) {
+  return nodes.map((node) => {
+    const { onUpdate, onRemove, ...data } = node.data
+    return { ...node, data }
+  })
+}
+
+function findTarget(edges: Edge[], source: string, sourceHandle?: string | null) {
+  return edges.find((edge) => edge.source === source && (sourceHandle ? edge.sourceHandle === sourceHandle : !edge.sourceHandle))?.target || null
+}
+
+function targetActionForChat(nodes: Node<VisualNodeData>[], targetId: string | null, fallback: VisualButton) {
+  const target = nodes.find((node) => node.id === targetId)
+  if (!target) {
+    return { action: fallback.action, targetMessageId: null, actionLabel: fallback.actionLabel || null }
+  }
+  if (target.data.kind === 'chatAction') {
+    return { action: (target.data.action || 'queue') as ChatFlowButtonAction, targetMessageId: null, actionLabel: target.data.actionLabel || target.data.title || null }
+  }
+  return { action: 'goto' as ChatFlowButtonAction, targetMessageId: target.id, actionLabel: null }
+}
+
+function buildChatMessages(nodes: Node<VisualNodeData>[], edges: Edge[]): ChatFlowMessage[] {
+  const messageNodes = nodes.filter((node) => ['chatGreeting', 'chatButtons', 'chatText'].includes(node.data.kind))
+  return messageNodes.map((node, index) => {
+    const visualButtons = node.data.kind === 'chatButtons'
+      ? (node.data.buttons || [])
+      : (findTarget(edges, node.id) ? [{ ...createEmptyChatButton(), id: `${node.id}-next`, label: 'Continuar', action: 'goto' as ChatFlowButtonAction }] : [])
+    const buttons = visualButtons.map((button) => {
+      const targetId = findTarget(edges, node.id, button.id.startsWith(`${node.id}-next`) ? null : `button:${button.id}`)
+      const action = targetActionForChat(nodes, targetId, button)
+      return {
+        id: button.id,
+        label: button.label || 'Continuar',
+        ...action,
+      }
+    })
+    return {
+      id: node.id,
+      title: node.data.title || (index === 0 ? 'Saudação' : `Mensagem ${index + 1}`),
+      text: node.data.text || '',
+      buttons,
+    }
+  }).filter((message) => message.text.trim())
+}
+
+function buildCallDigits(nodes: Node<VisualNodeData>[], edges: Edge[]): CallDigitConfig[] {
+  const menu = nodes.find((node) => node.data.kind === 'callMenu')
+  const options = menu?.data.options?.length ? menu.data.options : createDefaultCallDigits()
+  return options.map((option) => {
+    const targetId = menu ? findTarget(edges, menu.id, `digit:${option.digit}`) : null
+    const target = nodes.find((node) => node.id === targetId)
+    if (target?.data.kind === 'callAction') {
+      return {
+        ...option,
+        action: target.data.action === 'repeat' ? 'goto' : ((target.data.action || option.action) as CallDigitAction),
+        actionLabel: target.data.actionLabel || target.data.title || option.actionLabel || null,
+      }
+    }
+    if (target?.data.kind === 'callText') {
+      return { ...option, action: 'info', speech: target.data.text || option.speech, actionLabel: target.data.title || option.actionLabel || null }
+    }
+    if (target?.data.kind === 'callMenu') {
+      return { ...option, action: 'goto', targetDigit: option.targetDigit || null }
+    }
+    return option
+  })
+}
+
+function getGreetingText(nodes: Node<VisualNodeData>[], kind: VisualKind, fallback: string) {
+  return nodes.find((node) => node.data.kind === kind)?.data.text || fallback
+}
+
+function hasCycle(nodes: Node<VisualNodeData>[], edges: Edge[]) {
+  const graph = new Map<string, string[]>()
+  nodes.forEach((node) => graph.set(node.id, []))
+  edges.forEach((edge) => graph.get(edge.source)?.push(edge.target))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+
+  const visit = (nodeId: string): boolean => {
+    if (visiting.has(nodeId)) return true
+    if (visited.has(nodeId)) return false
+    visiting.add(nodeId)
+    for (const target of graph.get(nodeId) || []) {
+      if (visit(target)) return true
+    }
+    visiting.delete(nodeId)
+    visited.add(nodeId)
+    return false
+  }
+
+  return nodes.some((node) => visit(node.id))
+}
+
+function validateFlow(section: BotSection, nodes: Node<VisualNodeData>[], edges: Edge[]) {
+  const greetingKind = section === 'chat' ? 'chatGreeting' : 'callGreeting'
+  const greetings = nodes.filter((node) => node.data.kind === greetingKind)
+  if (greetings.length !== 1) return `O fluxo de ${section === 'chat' ? 'chat' : 'ligação'} precisa ter exatamente 1 saudação.`
+  if (nodes.length > 1) {
+    const disconnected = nodes.filter((node) => node.id !== greetings[0].id && !edges.some((edge) => edge.target === node.id))
+    if (disconnected.length) return `Existem cards desconectados: ${disconnected.map((node) => node.data.title).join(', ')}.`
+  }
+  const missingButtonTarget = nodes.some((node) => node.data.kind === 'chatButtons' && (node.data.buttons || []).some((button) => !findTarget(edges, node.id, `button:${button.id}`) && button.action === 'goto'))
+  if (missingButtonTarget) return 'Todo botão configurado como "Ir para outro fluxo" precisa estar conectado a outro card.'
+  const missingDigitTarget = nodes.some((node) => node.data.kind === 'callMenu' && (node.data.options || []).some((option) => option.action === 'goto' && !findTarget(edges, node.id, `digit:${option.digit}`)))
+  if (missingDigitTarget) return 'Toda opção numérica configurada como "Ir para outro fluxo" precisa estar conectada.'
+  if (hasCycle(nodes, edges)) return 'O fluxo possui loop. Remova a conexão circular antes de salvar.'
+  return null
+}
+
+function PaletteCard({ kind, title, description, icon: Icon }: { kind: VisualKind; title: string; description: string; icon: any }) {
+  return (
+    <div
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData('application/atendepro-bot-node', kind)
+        event.dataTransfer.effectAllowed = 'move'
+      }}
+      className="cursor-grab rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary hover:shadow-md active:cursor-grabbing"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div>
+          <p className="font-semibold">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function BotPage() {
   const { company } = useAuth()
   const [activeSection, setActiveSection] = useState<BotSection>('chat')
   const [saving, setSaving] = useState(false)
   const [botName, setBotName] = useState('AtendePro BOT')
-  const [chatMessages, setChatMessages] = useState<ChatFlowMessage[]>([createEmptyChatMessage(1)])
-  const [callDigits, setCallDigits] = useState<CallDigitConfig[]>(createDefaultCallDigits())
-  const [callIntroText, setCallIntroText] = useState('Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.')
-  const [draggedMessageId, setDraggedMessageId] = useState<string | null>(null)
+  const [validationMessage, setValidationMessage] = useState<string | null>(null)
+  const [flowInstance, setFlowInstance] = useState<any>(null)
+  const [chatNodes, setChatNodes, onChatNodesChange] = useNodesState<Node<VisualNodeData>>([])
+  const [chatEdges, setChatEdges, onChatEdgesChange] = useEdgesState<Edge>([])
+  const [callNodes, setCallNodes, onCallNodesChange] = useNodesState<Node<VisualNodeData>>([])
+  const [callEdges, setCallEdges, onCallEdgesChange] = useEdgesState<Edge>([])
+
+  const nodes = activeSection === 'chat' ? chatNodes : callNodes
+  const edges = activeSection === 'chat' ? chatEdges : callEdges
+  const setNodes = activeSection === 'chat' ? setChatNodes : setCallNodes
+  const setEdges = activeSection === 'chat' ? setChatEdges : setCallEdges
+  const onNodesChange = activeSection === 'chat' ? onChatNodesChange : onCallNodesChange
+  const onEdgesChange = activeSection === 'chat' ? onChatEdgesChange : onCallEdgesChange
+
+  const updateNode = useCallback((nodeId: string, patch: Partial<VisualNodeData>) => {
+    setChatNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node))
+    setCallNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node))
+  }, [setCallNodes, setChatNodes])
+
+  const removeNode = useCallback((nodeId: string) => {
+    setChatNodes((current) => current.filter((node) => node.id !== nodeId))
+    setChatEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
+    setCallNodes((current) => current.filter((node) => node.id !== nodeId))
+    setCallEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
+  }, [setCallEdges, setCallNodes, setChatEdges, setChatNodes])
 
   useEffect(() => {
     if (!company) return
     setBotName(company.botName || 'AtendePro BOT')
-    setChatMessages(parseChatFlow(company.settings?.chatBotFlowMessages))
-    setCallDigits(parseCallDigits(company.settings?.callBotOptions))
-    setCallIntroText(company.settings?.callBotGreeting || 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.')
-  }, [company])
+    const chatFlow = company.settings?.visualBotFlows?.chat || createDefaultChatVisualFlow(parseChatFlow(company.settings?.chatBotFlowMessages))
+    const callFlow = company.settings?.visualBotFlows?.call || createDefaultCallVisualFlow(company.settings?.callBotGreeting || 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.', parseCallDigits(company.settings?.callBotOptions))
+    setChatNodes(applyNodeHandlers(chatFlow.nodes || [], updateNode, removeNode))
+    setChatEdges(chatFlow.edges || [])
+    setCallNodes(applyNodeHandlers(callFlow.nodes || [], updateNode, removeNode))
+    setCallEdges(callFlow.edges || [])
+  }, [company, removeNode, setCallEdges, setCallNodes, setChatEdges, setChatNodes, updateNode])
 
-  const messageOptions = useMemo(() => chatMessages.map((message) => ({ id: message.id, title: message.title || 'Mensagem' })), [chatMessages])
+  const onConnect = useCallback((connection: Connection) => {
+    setEdges((current) => addEdge({
+      ...connection,
+      id: createId('edge'),
+      type: 'smoothstep',
+      animated: true,
+      markerEnd: { type: MarkerType.ArrowClosed },
+    }, current))
+  }, [setEdges])
 
-  const updateMessage = (messageId: string, field: 'title' | 'text', value: string) => {
-    setChatMessages((current) => current.map((message) => message.id === messageId ? { ...message, [field]: value } : message))
-  }
+  const onDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    const kind = event.dataTransfer.getData('application/atendepro-bot-node') as VisualKind
+    if (!kind) return
+    if ((activeSection === 'chat' && !kind.startsWith('chat')) || (activeSection === 'call' && !kind.startsWith('call'))) {
+      toast.error('Esse card pertence à outra configuração.')
+      return
+    }
+    if (kind.includes('Greeting') && nodes.some((node) => node.data.kind === kind)) {
+      toast.error('Este fluxo já possui uma saudação.')
+      return
+    }
+    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    const position = flowInstance?.screenToFlowPosition
+      ? flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      : { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    setNodes((current) => applyNodeHandlers([...current, createVisualNode(kind, position)], updateNode, removeNode))
+  }, [activeSection, flowInstance, nodes, removeNode, setNodes, updateNode])
 
-  const addMessage = () => {
-    setChatMessages((current) => [...current, createEmptyChatMessage(current.length + 1)])
-  }
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
 
-  const reorderMessages = (fromId: string, toId: string) => {
-    setChatMessages((current) => {
-      const fromIndex = current.findIndex((message) => message.id === fromId)
-      const toIndex = current.findIndex((message) => message.id === toId)
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return current
-      const clone = [...current]
-      const [moved] = clone.splice(fromIndex, 1)
-      clone.splice(toIndex, 0, moved)
-      return clone
-    })
-  }
-
-  const moveMessage = (messageId: string, direction: 'up' | 'down') => {
-    setChatMessages((current) => {
-      const index = current.findIndex((message) => message.id === messageId)
-      if (index < 0) return current
-      const targetIndex = direction === 'up' ? index - 1 : index + 1
-      if (targetIndex < 0 || targetIndex >= current.length) return current
-      const clone = [...current]
-      const [item] = clone.splice(index, 1)
-      clone.splice(targetIndex, 0, item)
-      return clone
-    })
-  }
-
-  const removeMessage = (messageId: string) => {
-    setChatMessages((current) => {
-      const filtered = current.filter((message) => message.id !== messageId)
-      if (filtered.length === 0) return [createEmptyChatMessage(1)]
-      return filtered.map((message) => ({
-        ...message,
-        buttons: message.buttons.map((button) => button.targetMessageId === messageId ? { ...button, targetMessageId: null } : button),
-      }))
-    })
-  }
-
-  const addButtonToMessage = (messageId: string) => {
-    setChatMessages((current) => current.map((message) => message.id === messageId ? { ...message, buttons: [...message.buttons, createEmptyChatButton()] } : message))
-  }
-
-  const updateButton = (messageId: string, buttonId: string, field: keyof ChatFlowButton, value: string) => {
-    setChatMessages((current) => current.map((message) => {
-      if (message.id !== messageId) return message
-      return {
-        ...message,
-        buttons: message.buttons.map((button) => button.id === buttonId ? { ...button, [field]: value } : button),
-      }
-    }))
-  }
-
-  const removeButton = (messageId: string, buttonId: string) => {
-    setChatMessages((current) => current.map((message) => {
-      if (message.id !== messageId) return message
-      return {
-        ...message,
-        buttons: message.buttons.length === 1 ? [createEmptyChatButton()] : message.buttons.filter((button) => button.id !== buttonId),
-      }
-    }))
-  }
-
-  const updateCallDigit = (digit: string, field: keyof CallDigitConfig, value: string) => {
-    setCallDigits((current) => current.map((item) => item.digit === digit ? { ...item, [field]: value } : item))
-  }
+  const palette = activeSection === 'chat'
+    ? [
+        { kind: 'chatGreeting' as VisualKind, title: 'Saudação', description: 'Mensagem inicial única do chat.', icon: Bot },
+        { kind: 'chatButtons' as VisualKind, title: 'Botões', description: 'Opções clicáveis com saídas próprias.', icon: MousePointer2 },
+        { kind: 'chatText' as VisualKind, title: 'Texto', description: 'Resposta automática informativa.', icon: Type },
+        { kind: 'chatAction' as VisualKind, title: 'Ações', description: 'Fila, encerrar, link ou ação.', icon: Zap },
+      ]
+    : [
+        { kind: 'callGreeting' as VisualKind, title: 'Saudação', description: 'Áudio inicial falado por TTS.', icon: Bot },
+        { kind: 'callMenu' as VisualKind, title: 'Menu numérico', description: 'DTMF com teclas de 0 a 9.', icon: PhoneCall },
+        { kind: 'callText' as VisualKind, title: 'Texto falado', description: 'Informação convertida em voz.', icon: Type },
+        { kind: 'callAction' as VisualKind, title: 'Ações', description: 'Atendente, encerrar ou repetir.', icon: Zap },
+      ]
 
   const handleSave = async () => {
     if (!company?.id) return
+    const cleanChatNodes = stripHandlers(chatNodes)
+    const cleanCallNodes = stripHandlers(callNodes)
+    const chatError = validateFlow('chat', cleanChatNodes, chatEdges)
+    const callError = validateFlow('call', cleanCallNodes, callEdges)
+    if (chatError || callError) {
+      const message = chatError || callError || 'Revise o fluxo antes de salvar.'
+      setValidationMessage(message)
+      toast.error(message)
+      return
+    }
+
     setSaving(true)
+    setValidationMessage(null)
     try {
-      const persistedChat = chatMessages.map((message) => ({
-        id: message.id,
-        title: message.title.trim() || 'Mensagem',
-        text: message.text.trim(),
-        buttons: message.buttons.map((button) => ({
-          id: button.id,
-          label: button.label.trim(),
-          action: button.action,
-          targetMessageId: button.targetMessageId || null,
-          actionLabel: button.actionLabel || null,
-        })).filter((button) => button.label),
-      })).filter((message) => message.text)
+      const chatMessages = buildChatMessages(cleanChatNodes, chatEdges)
+      const callDigits = buildCallDigits(cleanCallNodes, callEdges)
+      const callGreeting = getGreetingText(cleanCallNodes, 'callGreeting', 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.')
+      const chatGreeting = chatMessages[0]?.text || getGreetingText(cleanChatNodes, 'chatGreeting', 'Olá! Como posso ajudar?')
 
       await updateDoc(doc(db, 'companies', company.id), {
         botName,
-        botGreeting: persistedChat[0]?.text || 'Olá! Como posso ajudar?',
+        botGreeting: chatGreeting,
         settings: {
           ...(company.settings || {}),
-          chatBotFlowMessages: persistedChat,
-          callBotGreeting: callIntroText,
+          chatBotFlowMessages: chatMessages,
+          callBotGreeting: callGreeting,
           callBotOptions: callDigits,
+          visualBotFlows: {
+            version: 1,
+            chat: { nodes: cleanChatNodes, edges: chatEdges },
+            call: { nodes: cleanCallNodes, edges: callEdges },
+          },
         },
       })
 
@@ -143,219 +622,107 @@ export default function BotPage() {
     }
   }
 
+  const currentError = useMemo(() => validateFlow(activeSection, stripHandlers(nodes), edges), [activeSection, edges, nodes])
+
   return (
-    <div className="space-y-6" data-testid="dashboard-bot-page">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex min-h-[calc(100vh-7rem)] flex-col gap-5" data-testid="dashboard-bot-page">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl">Configuração do BOT</h1>
           <p className="mt-1 text-sm text-muted-foreground">A empresa controla o fluxo do chat e da ligação com mensagens, botões, números e ações.</p>
         </div>
         <Button onClick={handleSave} disabled={saving} className="bg-gradient-primary" data-testid="bot-save-button">
-          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Salvar configuração
+          {saving ? <Save className="mr-2 h-4 w-4 animate-pulse" /> : <Save className="mr-2 h-4 w-4" />}
+          Salvar Configuração
         </Button>
       </div>
 
       <Card className="glass border-border/80">
-        <CardHeader>
-          <CardTitle>Nome do BOT</CardTitle>
-          <CardDescription>Nome exibido para cliente no chat e na ligação.</CardDescription>
+        <CardHeader className="pb-3">
+          <CardTitle>Configuração geral</CardTitle>
+          <CardDescription>Nome usado pelo BOT no chat e na ligação.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Input value={botName} onChange={(event) => setBotName(event.target.value)} data-testid="bot-name-input" />
+          <div className="max-w-xl space-y-2">
+            <Label>Nome do BOT</Label>
+            <Input value={botName} onChange={(event) => setBotName(event.target.value)} data-testid="bot-name-input" />
+          </div>
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant={activeSection === 'chat' ? 'default' : 'outline'} onClick={() => setActiveSection('chat')} data-testid="bot-open-chat-config-button">
-          Configuração de Chat
+          <MessageSquare className="mr-2 h-4 w-4" />
+          Fluxo de Chat
         </Button>
         <Button variant={activeSection === 'call' ? 'default' : 'outline'} onClick={() => setActiveSection('call')} data-testid="bot-open-call-config-button">
-          Configuração de Ligação
+          <PhoneCall className="mr-2 h-4 w-4" />
+          Fluxo de Ligação
         </Button>
+        <div className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs ${currentError ? 'border-amber-400 bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'border-emerald-400 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'}`}>
+          {currentError ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+          {currentError || 'Fluxo atual válido'}
+        </div>
       </div>
 
-      {activeSection === 'chat' ? (
-        <div className="space-y-4" data-testid="bot-chat-config-panel">
-          <Card className="glass border-border/80">
-            <CardHeader>
-              <CardTitle>Saudação inicial</CardTitle>
-              <CardDescription>É a primeira mensagem enviada assim que o cliente entra em um chat novo.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={chatMessages[0]?.text || ''}
-                onChange={(event) => updateMessage(chatMessages[0]?.id || '', 'text', event.target.value)}
-                className="min-h-[120px]"
-                data-testid="bot-chat-greeting-input"
-              />
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={addMessage} data-testid="bot-add-message-button">
-              <Plus className="mr-2 h-4 w-4" />
-              Criar nova mensagem
-            </Button>
-          </div>
-
-          {chatMessages.map((message, messageIndex) => (
-            <Card
-              key={message.id}
-              draggable
-              onDragStart={() => setDraggedMessageId(message.id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => {
-                if (draggedMessageId) reorderMessages(draggedMessageId, message.id)
-                setDraggedMessageId(null)
-              }}
-              className="glass border-border/80"
-              data-testid={`bot-chat-message-card-${message.id}`}
-            >
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <CardTitle>{messageIndex === 0 ? 'Mensagem inicial' : `Mensagem ${messageIndex + 1}`}</CardTitle>
-                    <CardDescription>Crie a mensagem, adicione botões e defina a ação de cada botão.</CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <GripVertical className="h-5 w-5 text-muted-foreground" />
-                    <Button variant="ghost" size="sm" onClick={() => moveMessage(message.id, 'up')} data-testid={`bot-move-message-up-${message.id}`}><ArrowUp className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="sm" onClick={() => moveMessage(message.id, 'down')} data-testid={`bot-move-message-down-${message.id}`}><ArrowDown className="h-4 w-4" /></Button>
-                    {messageIndex > 0 ? (
-                      <Button variant="ghost" size="icon" onClick={() => removeMessage(message.id)} data-testid={`bot-remove-message-${message.id}`}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Título interno</Label>
-                  <Input value={message.title} onChange={(event) => updateMessage(message.id, 'title', event.target.value)} data-testid={`bot-message-title-${message.id}`} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Mensagem do BOT</Label>
-                  <Textarea value={message.text} onChange={(event) => updateMessage(message.id, 'text', event.target.value)} className="min-h-[120px]" data-testid={`bot-message-text-${message.id}`} />
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button type="button" variant="outline" onClick={() => addButtonToMessage(message.id)} data-testid={`bot-add-button-${message.id}`}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar botão
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => addButtonToMessage(message.id)} data-testid={`bot-add-action-${message.id}`}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar ação
-                  </Button>
-                </div>
-
-                <div className="space-y-3">
-                  {message.buttons.map((button, buttonIndex) => (
-                    <div key={button.id} className="rounded-2xl border border-border bg-card/60 p-4" data-testid={`bot-button-card-${button.id}`}>
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <p className="font-medium">Botão {buttonIndex + 1}</p>
-                        <Button variant="ghost" size="icon" onClick={() => removeButton(message.id, button.id)} data-testid={`bot-remove-button-${button.id}`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="space-y-2">
-                          <Label>Texto do botão</Label>
-                          <Input value={button.label} onChange={(event) => updateButton(message.id, button.id, 'label', event.target.value)} data-testid={`bot-button-label-${button.id}`} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Ação do botão</Label>
-                          <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={button.action} onChange={(event) => updateButton(message.id, button.id, 'action', event.target.value)} data-testid={`bot-button-action-${button.id}`}>
-                            <option value="goto">Ir para outra mensagem</option>
-                            <option value="queue">Enviar para fila</option>
-                            <option value="action">Executar ação específica</option>
-                            <option value="close">Encerrar fluxo</option>
-                          </select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Destino da mensagem</Label>
-                          <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={button.targetMessageId || ''} onChange={(event) => updateButton(message.id, button.id, 'targetMessageId', event.target.value)} data-testid={`bot-button-target-${button.id}`}>
-                            <option value="">Sem destino</option>
-                            {messageOptions.filter((item) => item.id !== message.id).map((target) => (
-                              <option key={target.id} value={target.id}>{target.title}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Ação específica</Label>
-                          <Input value={button.actionLabel || ''} onChange={(event) => updateButton(message.id, button.id, 'actionLabel', event.target.value)} placeholder="Ex: registrar entrega" data-testid={`bot-button-action-label-${button.id}`} />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+      {validationMessage ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {validationMessage}
         </div>
-      ) : (
-        <div className="space-y-4" data-testid="bot-call-config-panel">
-          <Card className="glass border-border/80">
-            <CardHeader>
-              <CardTitle>Mensagem inicial da ligação</CardTitle>
-              <CardDescription>Texto que será falado antes do cliente digitar um número.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea value={callIntroText} onChange={(event) => setCallIntroText(event.target.value)} className="min-h-[120px]" data-testid="bot-call-intro-input" />
-            </CardContent>
-          </Card>
+      ) : null}
 
-          <Card className="glass border-border/80">
-            <CardHeader>
-              <CardTitle>Teclado da ligação</CardTitle>
-              <CardDescription>Para cada número de 0 a 9, defina a mensagem falada e a ação correspondente.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {callDigits.map((digit) => (
-                <div key={digit.digit} className="rounded-2xl border border-border bg-card/60 p-4" data-testid={`bot-call-digit-card-${digit.digit}`}>
-                  <p className="mb-3 text-lg font-bold">Tecla {digit.digit}</p>
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label>Título</Label>
-                      <Input value={digit.label} onChange={(event) => updateCallDigit(digit.digit, 'label', event.target.value)} data-testid={`bot-call-digit-label-${digit.digit}`} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Mensagem falada</Label>
-                      <Textarea value={digit.speech} onChange={(event) => updateCallDigit(digit.digit, 'speech', event.target.value)} className="min-h-[100px]" data-testid={`bot-call-digit-speech-${digit.digit}`} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Ação</Label>
-                      <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={digit.action} onChange={(event) => updateCallDigit(digit.digit, 'action', event.target.value)} data-testid={`bot-call-digit-action-${digit.digit}`}>
-                        <option value="info">Ler informação</option>
-                        <option value="goto">Ir para outro número</option>
-                        <option value="transfer">Enviar para fila</option>
-                        <option value="action">Executar ação específica</option>
-                        <option value="end">Encerrar ligação</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Ir para o número</Label>
-                      <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={digit.targetDigit || ''} onChange={(event) => updateCallDigit(digit.digit, 'targetDigit', event.target.value)} data-testid={`bot-call-digit-target-${digit.digit}`}>
-                        <option value="">Sem destino</option>
-                        {callDigits.filter((item) => item.digit !== digit.digit).map((item) => (
-                          <option key={item.digit} value={item.digit}>{item.digit} - {item.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Ação específica</Label>
-                      <Input value={digit.actionLabel || ''} onChange={(event) => updateCallDigit(digit.digit, 'actionLabel', event.target.value)} placeholder="Ex: encaminhar para setor financeiro" data-testid={`bot-call-digit-action-label-${digit.digit}`} />
-                    </div>
-                  </div>
-                </div>
+      <div className="grid min-h-[720px] flex-1 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="relative min-h-[720px] bg-background">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onInit={setFlowInstance}
+            fitView
+            snapToGrid
+            snapGrid={[24, 24]}
+            className="bot-flow-canvas"
+          >
+            <Background gap={24} size={1.4} />
+            <MiniMap pannable zoomable nodeStrokeWidth={3} className="!bg-background/95" />
+            <Controls showInteractive={false} />
+            <Panel position="top-left">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm shadow-sm backdrop-blur">
+                <Workflow className="h-4 w-4 text-primary" />
+                Arraste cards, conecte pontos e use zoom/pan livremente.
+              </div>
+            </Panel>
+          </ReactFlow>
+        </div>
+
+        <aside className="border-t border-border bg-muted/30 p-4 lg:border-l lg:border-t-0">
+          <div className="sticky top-20 space-y-4">
+            <div>
+              <h2 className="font-semibold">Componentes</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Clique, segure e arraste para o canvas.</p>
+            </div>
+
+            <div className="space-y-3">
+              {palette.map((item) => (
+                <PaletteCard key={item.kind} {...item} />
               ))}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
+              <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                <Link2 className="h-4 w-4" />
+                Conexões
+              </div>
+              Cards possuem entrada à esquerda e saídas à direita. Botões e números criam uma saída individual para cada opção.
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }
