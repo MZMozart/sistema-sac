@@ -447,10 +447,22 @@ function createVisualEdge(source: string, target: string, sourceHandle?: string 
 }
 
 function stripHandlers(nodes: Node<VisualNodeData>[]) {
-  return nodes.map((node) => {
+  const stripped = nodes.map((node) => {
     const { onUpdate, onRemove, ...data } = node.data
     return { ...node, data }
   })
+  return removeUndefinedDeep(stripped) as Node<VisualNodeData>[]
+}
+
+function removeUndefinedDeep(value: any): any {
+  if (Array.isArray(value)) return value.map(removeUndefinedDeep)
+  if (!value || typeof value !== 'object') return value
+
+  return Object.entries(value).reduce((acc, [key, entry]) => {
+    if (entry === undefined) return acc
+    acc[key] = removeUndefinedDeep(entry)
+    return acc
+  }, {} as Record<string, any>)
 }
 
 function findTarget(edges: Edge[], source: string, sourceHandle?: string | null) {
@@ -707,7 +719,7 @@ export default function BotPage() {
       const callGreeting = getGreetingText(cleanCallNodes, 'callGreeting', 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.')
       const chatGreeting = chatMessages[0]?.text || getGreetingText(cleanChatNodes, 'chatGreeting', 'Olá! Como posso ajudar?')
 
-      await updateDoc(doc(db, 'companies', company.id), {
+      const payload = removeUndefinedDeep({
         botName,
         botGreeting: chatGreeting,
         settings: {
@@ -722,9 +734,11 @@ export default function BotPage() {
           },
         },
       })
+      await updateDoc(doc(db, 'companies', company.id), payload)
 
       toast.success('Configuração do BOT salva com sucesso.')
-    } catch {
+    } catch (error) {
+      console.error('Erro ao salvar configuração do BOT:', error)
       toast.error('Não foi possível salvar a configuração do BOT.')
     } finally {
       setSaving(false)
