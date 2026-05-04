@@ -17,7 +17,11 @@ export async function rebalanceCallQueue(companyId: string) {
   const staleWaitingCalls = rows.filter((call) => {
     if (call.status !== 'waiting') return false
     if (call.clientConnected === false) return true
-    if (!call.clientHeartbeatAt) return false
+    if (!call.clientHeartbeatAt) {
+      if (!call.requestedHumanAt && !call.updatedAt) return false
+      const reference = toDateValue(call.requestedHumanAt || call.updatedAt)
+      return reference.getTime() < activeLimit
+    }
     return toDateValue(call.clientHeartbeatAt).getTime() < activeLimit
   })
 

@@ -105,6 +105,15 @@ export default function ChatsPage() {
   }, [company?.id, selectedChatId])
 
   useEffect(() => {
+    if (!company?.id) return
+    rebalanceChatQueue(company.id).catch(() => null)
+    const timer = window.setInterval(() => {
+      rebalanceChatQueue(company.id).catch(() => null)
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, [company?.id])
+
+  useEffect(() => {
     const container = messagesContainerRef.current
     if (!container || !selectedChatId) return
 

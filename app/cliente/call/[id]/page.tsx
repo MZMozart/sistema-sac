@@ -37,6 +37,7 @@ export default function ClientCallPage() {
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
   const speakingRef = useRef(false)
+  const speechQueueRef = useRef<Promise<void>>(Promise.resolve())
   const localCallStreamRef = useRef<MediaStream | null>(null)
   const callAudioGraphRef = useRef<{
     context: AudioContext
@@ -121,7 +122,7 @@ export default function ClientCallPage() {
     const intro = callBotGreeting || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
     const optionsText = callBotOptions
       .filter((option: any) => option?.digit || option?.label)
-      .map((option: any) => `Digite ${option?.digit || ''} para ${option?.speech || option?.description || option?.label || 'continuar'}.`)
+      .map((option: any) => `Digite ${option?.digit || ''} para ${option?.label || option?.actionLabel || option?.description || 'continuar'}.`)
       .join(' ')
     return [intro, optionsText].filter(Boolean).join(' ')
   }, [callBotGreeting, callBotOptions, session?.companyName])
@@ -189,7 +190,7 @@ export default function ClientCallPage() {
     })
   }
 
-  const speakText = async (text: string) => {
+  const playSpeechNow = async (text: string) => {
     const cleanText = text.trim()
     if (!cleanText || speakingRef.current) return
     speakingRef.current = true
@@ -224,15 +225,21 @@ export default function ClientCallPage() {
         audio.volume = 1
         const source = graph.context.createMediaElementSource(audio)
         source.connect(graph.botGain)
-        audio.onended = () => {
-          source.disconnect()
-          URL.revokeObjectURL(audioUrl)
-          speakingRef.current = false
-        }
-        await audio.play().catch(() => {
-          URL.revokeObjectURL(audioUrl)
-          fallbackSpeakText(cleanText)
-          speakingRef.current = false
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            source.disconnect()
+            URL.revokeObjectURL(audioUrl)
+            speakingRef.current = false
+            resolve()
+          }
+          audio.onended = finish
+          audio.onerror = finish
+          audio.play().catch(async () => {
+            URL.revokeObjectURL(audioUrl)
+            await fallbackSpeakText(cleanText)
+            speakingRef.current = false
+            resolve()
+          })
         })
       } else {
         URL.revokeObjectURL(audioUrl)
@@ -243,6 +250,16 @@ export default function ClientCallPage() {
       await fallbackSpeakText(cleanText)
       speakingRef.current = false
     }
+  }
+
+  const speakText = async (text: string) => {
+    const cleanText = text.trim()
+    if (!cleanText) return
+    const nextSpeech = speechQueueRef.current
+      .catch(() => undefined)
+      .then(() => playSpeechNow(cleanText))
+    speechQueueRef.current = nextSpeech
+    await nextSpeech
   }
 
   useEffect(() => {

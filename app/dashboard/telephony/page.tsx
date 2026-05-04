@@ -92,6 +92,15 @@ export default function TelephonyPage() {
 
   useEffect(() => {
     if (!company?.id) return
+    rebalanceCallQueue(company.id).catch(() => null)
+    const timer = window.setInterval(() => {
+      rebalanceCallQueue(company.id).catch(() => null)
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, [company?.id])
+
+  useEffect(() => {
+    if (!company?.id) return
     const employeeQuery = query(collection(db, 'employees'), where('companyId', '==', company.id))
     const unsubscribe = onSnapshot(employeeQuery, (snapshot) => {
       const rows = snapshot.docs

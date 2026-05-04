@@ -24,7 +24,6 @@ import { AlertTriangle, Bot, CheckCircle2, Hash, Link2, MessageSquare, MousePoin
 import { useAuth } from '@/contexts/auth-context'
 import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -32,7 +31,7 @@ import { createDefaultCallDigits, createEmptyChatButton, createEmptyChatMessage,
 import { toast } from 'sonner'
 
 type BotSection = 'chat' | 'call'
-type VisualKind = 'chatGreeting' | 'chatButtons' | 'chatText' | 'chatAction' | 'callGreeting' | 'callDigit' | 'callMenu' | 'callText' | 'callAction'
+type VisualKind = 'chatGreeting' | 'chatButtons' | 'chatText' | 'chatLink' | 'chatAction' | 'callGreeting' | 'callDigit' | 'callMenu' | 'callText' | 'callAction'
 
 type VisualButton = ChatFlowButton & {
   description?: string
@@ -65,6 +64,7 @@ function nodeTitle(kind: VisualKind) {
     chatGreeting: 'Saudação',
     chatButtons: 'Botões',
     chatText: 'Texto',
+    chatLink: 'Link',
     chatAction: 'Ação',
     callGreeting: 'Saudação',
     callDigit: 'Número',
@@ -78,6 +78,7 @@ function nodeTitle(kind: VisualKind) {
 function nodeColor(kind: VisualKind) {
   if (kind.includes('Greeting')) return 'border-emerald-400/70 bg-emerald-500/10'
   if (kind.includes('Buttons') || kind.includes('Menu') || kind.includes('Digit')) return 'border-blue-400/70 bg-blue-500/10'
+  if (kind.includes('Link')) return 'border-cyan-400/70 bg-cyan-500/10'
   if (kind.includes('Text')) return 'border-amber-400/70 bg-amber-500/10'
   return 'border-rose-400/70 bg-rose-500/10'
 }
@@ -106,6 +107,10 @@ function createVisualNode(kind: VisualKind, position = { x: 120, y: 120 }): Node
   }
   if (kind === 'chatText') {
     base.data.text = 'Mensagem informativa do BOT.'
+  }
+  if (kind === 'chatLink') {
+    base.data.text = 'Acesse o link abaixo para continuar.'
+    base.data.actionLabel = 'https://'
   }
   if (kind === 'chatAction') {
     base.data.action = 'queue'
@@ -149,7 +154,7 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
   }
 
   const canReceive = !data.kind.includes('Greeting')
-  const hasDefaultOutput = ['chatGreeting', 'chatText', 'chatAction', 'callGreeting', 'callDigit', 'callText', 'callAction'].includes(data.kind)
+  const hasDefaultOutput = ['chatGreeting', 'chatText', 'chatLink', 'chatAction', 'callGreeting', 'callDigit', 'callText', 'callAction'].includes(data.kind)
   const isChatAction = data.kind === 'chatAction'
   const isCallAction = data.kind === 'callAction'
 
@@ -172,14 +177,26 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
       </div>
 
       <div className="space-y-3 p-3">
-        {['chatGreeting', 'chatButtons', 'chatText', 'callGreeting', 'callText', 'callDigit'].includes(data.kind) ? (
+        {['chatGreeting', 'chatButtons', 'chatText', 'chatLink', 'callGreeting', 'callText', 'callDigit'].includes(data.kind) ? (
           <div className="space-y-2">
-            <Label>{data.kind.startsWith('call') ? 'Texto falado pelo BOT' : 'Texto da mensagem'}</Label>
+            <Label>{data.kind.startsWith('call') ? 'Texto falado pelo BOT' : data.kind === 'chatLink' ? 'Mensagem antes do link' : 'Texto da mensagem'}</Label>
             <Textarea
               value={data.text || ''}
               onChange={(event) => update({ text: event.target.value })}
               maxLength={2500}
               className="nodrag min-h-[96px] resize-none text-sm"
+            />
+          </div>
+        ) : null}
+
+        {data.kind === 'chatLink' ? (
+          <div className="space-y-2">
+            <Label>URL do link</Label>
+            <Input
+              value={data.actionLabel || ''}
+              onChange={(event) => update({ actionLabel: event.target.value })}
+              className="nodrag"
+              placeholder="https://site.com.br"
             />
           </div>
         ) : null}
@@ -524,8 +541,9 @@ function targetActionForChat(nodes: Node<VisualNodeData>[], targetId: string | n
 }
 
 function buildChatMessages(nodes: Node<VisualNodeData>[], edges: Edge[]): ChatFlowMessage[] {
-  const messageNodes = nodes.filter((node) => ['chatGreeting', 'chatButtons', 'chatText'].includes(node.data.kind))
+  const messageNodes = nodes.filter((node) => ['chatGreeting', 'chatButtons', 'chatText', 'chatLink'].includes(node.data.kind))
   return messageNodes.map((node, index) => {
+    const linkUrl = node.data.kind === 'chatLink' ? (node.data.actionLabel || '').trim() : ''
     const visualButtons = node.data.kind === 'chatButtons'
       ? (node.data.buttons || [])
       : (findTarget(edges, node.id) ? [{ ...createEmptyChatButton(), id: `${node.id}-next`, label: 'Continuar', action: 'goto' as ChatFlowButtonAction }] : [])
@@ -541,7 +559,9 @@ function buildChatMessages(nodes: Node<VisualNodeData>[], edges: Edge[]): ChatFl
     return {
       id: node.id,
       title: node.data.title || (index === 0 ? 'Saudação' : `Mensagem ${index + 1}`),
-      text: node.data.text || '',
+      text: node.data.kind === 'chatLink'
+        ? [node.data.text || 'Acesse o link abaixo.', linkUrl].filter(Boolean).join('\n')
+        : node.data.text || '',
       buttons,
     }
   }).filter((message) => message.text.trim())
@@ -736,6 +756,7 @@ export default function BotPage() {
         { kind: 'chatGreeting' as VisualKind, title: 'Saudação', description: 'Mensagem inicial única do chat.', icon: Bot },
         { kind: 'chatButtons' as VisualKind, title: 'Botões', description: 'Opções clicáveis com saídas próprias.', icon: MousePointer2 },
         { kind: 'chatText' as VisualKind, title: 'Texto', description: 'Resposta automática informativa.', icon: Type },
+        { kind: 'chatLink' as VisualKind, title: 'Link', description: 'Mensagem com URL para o cliente.', icon: Link2 },
         { kind: 'chatAction' as VisualKind, title: 'Ações', description: 'Fila, encerrar, link ou ação.', icon: Zap },
       ]
     : [
@@ -795,8 +816,9 @@ export default function BotPage() {
   const currentError = useMemo(() => validateFlow(activeSection, stripHandlers(nodes), edges), [activeSection, edges, nodes])
 
   return (
-    <div className="flex min-h-[calc(100vh-7rem)] flex-col gap-5" data-testid="dashboard-bot-page">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <div className="flex h-[calc(100vh-5.5rem)] min-h-[680px] flex-col gap-3 overflow-hidden" data-testid="dashboard-bot-page">
+      <div className="shrink-0 rounded-xl border border-border bg-background/95 px-4 py-3 shadow-sm backdrop-blur">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold sm:text-3xl">Configuração do BOT</h1>
           <p className="mt-1 text-sm text-muted-foreground">A empresa controla o fluxo do chat e da ligação com mensagens, botões, números e ações.</p>
@@ -805,22 +827,10 @@ export default function BotPage() {
           {saving ? <Save className="mr-2 h-4 w-4 animate-pulse" /> : <Save className="mr-2 h-4 w-4" />}
           Salvar Configuração
         </Button>
+        </div>
       </div>
 
-      <Card className="glass border-border/80">
-        <CardHeader className="pb-3">
-          <CardTitle>Configuração geral</CardTitle>
-          <CardDescription>Nome usado pelo BOT no chat e na ligação.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="max-w-xl space-y-2">
-            <Label>Nome do BOT</Label>
-            <Input value={botName} onChange={(event) => setBotName(event.target.value)} data-testid="bot-name-input" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-border bg-card/80 px-3 py-2 shadow-sm">
         <Button variant={activeSection === 'chat' ? 'default' : 'outline'} onClick={() => setActiveSection('chat')} data-testid="bot-open-chat-config-button">
           <MessageSquare className="mr-2 h-4 w-4" />
           Fluxo de Chat
@@ -835,14 +845,8 @@ export default function BotPage() {
         </div>
       </div>
 
-      {validationMessage ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {validationMessage}
-        </div>
-      ) : null}
-
-      <div className="grid min-h-[720px] flex-1 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="relative min-h-[720px] bg-background">
+      <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="relative min-h-0 bg-background">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -870,20 +874,20 @@ export default function BotPage() {
           </ReactFlow>
         </div>
 
-        <aside className="border-t border-border bg-muted/30 p-4 lg:border-l lg:border-t-0">
-          <div className="sticky top-20 space-y-4">
+        <aside className="min-h-0 overflow-hidden border-t border-border bg-muted/30 p-3 lg:border-l lg:border-t-0">
+          <div className="flex h-full min-h-0 flex-col gap-3">
             <div>
               <h2 className="font-semibold">Componentes</h2>
               <p className="mt-1 text-xs text-muted-foreground">Clique, segure e arraste para o canvas.</p>
             </div>
 
-            <div className="space-y-3">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
               {palette.map((item) => (
                 <PaletteCard key={item.kind} {...item} />
               ))}
             </div>
 
-            <div className="rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
+            <div className="shrink-0 rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
               <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
                 <Link2 className="h-4 w-4" />
                 Conexões
