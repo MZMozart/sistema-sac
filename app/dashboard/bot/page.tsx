@@ -243,6 +243,26 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
                 Botão
               </Button>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="nodrag h-8"
+                onClick={() => update({ buttons: [...(data.buttons || []), { ...createEmptyChatButton(), label: 'Falar com atendente', action: 'queue', actionLabel: 'Falar com atendente' }] })}
+              >
+                Atendente
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="nodrag h-8"
+                onClick={() => update({ buttons: [...(data.buttons || []), { ...createEmptyChatButton(), label: 'Encerrar conversa', action: 'close', actionLabel: 'Encerrar conversa' }] })}
+              >
+                Encerrar
+              </Button>
+            </div>
             <div className="space-y-2">
               {(data.buttons || []).map((button) => (
                 <div key={button.id} className="relative rounded-lg border border-border bg-card/70 p-2 pr-5">
@@ -469,10 +489,33 @@ function findTarget(edges: Edge[], source: string, sourceHandle?: string | null)
   return edges.find((edge) => edge.source === source && (sourceHandle ? edge.sourceHandle === sourceHandle : !edge.sourceHandle))?.target || null
 }
 
+function normalizeLabel(value?: string | null) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function inferChatTerminalAction(button: VisualButton): ChatFlowButtonAction {
+  const label = normalizeLabel(`${button.label} ${button.actionLabel || ''}`)
+  if (label.includes('atendente') || label.includes('especialista') || label.includes('humano') || label.includes('fila')) {
+    return 'queue'
+  }
+  if (label.includes('encerrar') || label.includes('finalizar') || label.includes('sair') || label.includes('nao') || label.includes('não')) {
+    return 'close'
+  }
+  return button.action === 'goto' ? 'close' : button.action
+}
+
 function targetActionForChat(nodes: Node<VisualNodeData>[], targetId: string | null, fallback: VisualButton) {
   const target = nodes.find((node) => node.id === targetId)
   if (!target) {
-    return { action: fallback.action, targetMessageId: null, actionLabel: fallback.actionLabel || null }
+    const action = inferChatTerminalAction(fallback)
+    return {
+      action,
+      targetMessageId: null,
+      actionLabel: fallback.actionLabel || (action === 'queue' ? 'Falar com atendente' : action === 'close' ? 'Encerrar conversa' : null),
+    }
   }
   if (target.data.kind === 'chatAction') {
     return { action: (target.data.action || 'queue') as ChatFlowButtonAction, targetMessageId: null, actionLabel: target.data.actionLabel || target.data.title || null }
@@ -572,8 +615,12 @@ function validateFlow(section: BotSection, nodes: Node<VisualNodeData>[], edges:
     const disconnected = nodes.filter((node) => node.id !== greetings[0].id && !edges.some((edge) => edge.target === node.id))
     if (disconnected.length) return `Existem cards desconectados: ${disconnected.map((node) => node.data.title).join(', ')}.`
   }
-  const missingButtonTarget = nodes.some((node) => node.data.kind === 'chatButtons' && (node.data.buttons || []).some((button) => !findTarget(edges, node.id, `button:${button.id}`) && button.action === 'goto'))
-  if (missingButtonTarget) return 'Todo botão configurado como "Ir para outro fluxo" precisa estar conectado a outro card.'
+  const missingButtonTarget = nodes.some((node) => node.data.kind === 'chatButtons' && (node.data.buttons || []).some((button) => {
+    if (button.action !== 'goto') return false
+    if (findTarget(edges, node.id, `button:${button.id}`)) return false
+    return !['queue', 'close'].includes(inferChatTerminalAction(button))
+  }))
+  if (missingButtonTarget) return 'Conecte os botões que realmente precisam continuar o fluxo. Botões de encerrar ou falar com atendente podem ficar sem conexão.'
   const missingDigitTarget = nodes.some((node) => (
     (node.data.kind === 'callMenu' && (node.data.options || []).some((option) => option.action === 'goto' && !findTarget(edges, node.id, `digit:${option.digit}`))) ||
     (node.data.kind === 'callDigit' && node.data.action === 'goto' && !findTarget(edges, node.id))

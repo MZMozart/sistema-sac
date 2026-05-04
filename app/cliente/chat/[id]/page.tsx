@@ -692,7 +692,7 @@ export default function ClientChatPage() {
 
     try {
       if (resolved) {
-        const followUp = 'Ótimo. Precisa de mais alguma coisa?'
+        const followUp = 'Ótimo. Vou encerrar o atendimento e liberar a avaliação deste protocolo.'
         await addDoc(collection(db, 'messages'), {
           chatId: id,
           companyId: chat.companyId,
@@ -706,18 +706,23 @@ export default function ClientChatPage() {
         })
 
         await updateDoc(doc(db, 'chats', id), {
-          status: 'bot',
-          botAwaitingAnythingElse: true,
+          status: 'closed',
+          botAwaitingAnythingElse: false,
+          botAwaitingResolvedConfirmation: false,
           botResolved: true,
           queuePosition: null,
+          endedAt: serverTimestamp(),
           lastMessage: followUp,
           lastMessageAt: serverTimestamp(),
         })
       } else {
+        const flowMessages = Array.isArray((company as any)?.settings?.chatBotFlowMessages) ? (company as any).settings.chatBotFlowMessages : []
+        const restartMessage = flowMessages[1] || flowMessages[0] || null
+        const restartReply = restartMessage?.text || 'Tudo bem. Vou voltar para o início do atendimento para tentarmos outro caminho.'
         await addDoc(collection(db, 'messages'), {
           chatId: id,
           companyId: chat.companyId,
-          content: 'Tudo bem. Vou reabrir seu atendimento para a equipe continuar ajudando.',
+          content: restartReply,
           type: 'text',
           senderType: 'bot',
           senderId: 'bot',
@@ -727,11 +732,17 @@ export default function ClientChatPage() {
         })
 
         await updateDoc(doc(db, 'chats', id), {
-          status: chat.employeeId ? 'active' : 'waiting',
+          status: 'bot',
+          botCurrentMessageId: restartMessage?.id || null,
           botAwaitingAnythingElse: false,
+          botAwaitingResolvedConfirmation: false,
           botResolved: false,
+          queuePosition: null,
+          employeeId: null,
+          employeeName: null,
+          lastMessage: restartReply,
+          lastMessageAt: serverTimestamp(),
         })
-        await rebalanceChatQueue(chat.companyId)
 
         await createAuditLog({
           companyId: chat.companyId,
