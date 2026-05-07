@@ -7,6 +7,8 @@ export type ChatFlowButton = {
   action: ChatFlowButtonAction
   targetMessageId?: string | null
   actionLabel?: string | null
+  sectorId?: string | null
+  sectorName?: string | null
 }
 
 export type ChatFlowMessage = {
@@ -23,6 +25,8 @@ export type CallDigitConfig = {
   action: CallDigitAction
   targetDigit?: string | null
   actionLabel?: string | null
+  sectorId?: string | null
+  sectorName?: string | null
 }
 
 export function createEmptyChatButton(): ChatFlowButton {
@@ -32,6 +36,8 @@ export function createEmptyChatButton(): ChatFlowButton {
     action: 'goto',
     targetMessageId: null,
     actionLabel: null,
+    sectorId: null,
+    sectorName: null,
   }
 }
 
@@ -52,6 +58,8 @@ export function createDefaultCallDigits(): CallDigitConfig[] {
     action: digit === '0' ? 'transfer' : 'info',
     targetDigit: null,
     actionLabel: null,
+    sectorId: null,
+    sectorName: null,
   }))
 }
 
@@ -69,6 +77,8 @@ export function parseChatFlow(raw: any): ChatFlowMessage[] {
           action: ['goto', 'queue', 'action', 'close'].includes(button?.action) ? button.action : 'goto',
           targetMessageId: button?.targetMessageId || null,
           actionLabel: button?.actionLabel || null,
+          sectorId: button?.sectorId || button?.setor_id || null,
+          sectorName: button?.sectorName || button?.setor_nome || null,
         }))
       : [createEmptyChatButton()],
   }))
@@ -87,6 +97,8 @@ export function parseCallDigits(raw: any): CallDigitConfig[] {
       action: ['info', 'transfer', 'action', 'end', 'goto'].includes(found?.action) ? found.action : fallback.action,
       targetDigit: found?.targetDigit || null,
       actionLabel: found?.actionLabel || null,
+      sectorId: found?.sectorId || found?.setor_id || null,
+      sectorName: found?.sectorName || found?.setor_nome || null,
     }
   })
 }

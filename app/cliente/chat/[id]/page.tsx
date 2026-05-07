@@ -33,6 +33,8 @@ import { createAuditLog } from '@/lib/audit';
 import { rebalanceChatQueue } from '@/lib/chat-queue';
 import { maybeHandleChatInactivity } from '@/lib/chat-inactivity';
 import { getChatFlowButtons, getChatFlowTargetMessage } from '@/lib/bot-flow';
+import { assignLeastLoadedAttendant as assignAttendantBySector } from '@/lib/attendant-assignment';
+import { DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors';
 import type { Chat, Message, Company } from '@/lib/types';
 
 interface PageProps {
@@ -71,26 +73,8 @@ function isNegative(message: string) {
   return /^(nao|não|n|negativo|ainda nao|ainda não)$/i.test(message.trim())
 }
 
-async function assignLeastLoadedAttendant(companyId: string) {
-  const [employeesSnapshot, chatsSnapshot] = await Promise.all([
-    getDocs(query(collection(db, 'employees'), where('companyId', '==', companyId))),
-    getDocs(query(collection(db, 'chats'), where('companyId', '==', companyId))),
-  ])
-
-  const employees = employeesSnapshot.docs
-    .map((item) => ({ id: item.id, ...(item.data() as any) }))
-    .filter((employee: any) => ['attendant', 'employee', 'manager', 'owner'].includes(employee.role))
-
-  const chats = chatsSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
-
-  const scored = employees
-    .map((employee: any) => ({
-      employee,
-      load: chats.filter((chat: any) => chat.employeeId === employee.userId && ['active', 'waiting', 'pending_resolution'].includes(chat.status)).length,
-    }))
-    .sort((a, b) => a.load - b.load)
-
-  return scored[0] || null
+async function assignLeastLoadedAttendant(companyId: string, sectorId?: string | null) {
+  return assignAttendantBySector(companyId, 'chat', sectorId)
 }
 
 export default function ClientChatPage() {
@@ -262,7 +246,9 @@ export default function ClientChatPage() {
 
       if (company && chat.status === 'bot') {
         if (company.botActive === false) {
-          const assignment = await assignLeastLoadedAttendant(chat.companyId)
+          const sectorId = (chat as any).setor_id || (chat as any).queueSectorId || DEFAULT_SECTOR_ID
+          const sectorName = (chat as any).setor_nome || (chat as any).queueSectorName || DEFAULT_SECTOR_NAME
+          const assignment = await assignLeastLoadedAttendant(chat.companyId, sectorId)
           await updateDoc(doc(db, 'chats', id), {
             status: 'waiting',
             employeeId: assignment?.employee?.userId || null,
@@ -332,6 +318,10 @@ export default function ClientChatPage() {
               botAwaitingResolvedConfirmation: false,
               employeeId: assignment?.employee?.userId || null,
               employeeName: assignment?.employee?.name || assignment?.employee?.email || null,
+              setor_id: sectorId,
+              setor_nome: sectorName,
+              queueSectorId: sectorId,
+              queueSectorName: sectorName,
               queuePosition,
               lastMessage: transferReply,
               lastMessageAt: serverTimestamp(),
@@ -349,7 +339,7 @@ export default function ClientChatPage() {
               employeeId: assignment?.employee?.userId || null,
               employeeName: assignment?.employee?.name || assignment?.employee?.email || null,
               summary: 'BOT transferiu o atendimento para a fila humana após falha na resolução.',
-              metadata: { queuePosition },
+              metadata: { queuePosition, setor: sectorName },
             })
             return
           }
@@ -480,7 +470,9 @@ export default function ClientChatPage() {
           return
         }
 
-        const assignment = await assignLeastLoadedAttendant(chat.companyId)
+        const sectorId = button.sectorId || (chat as any).setor_id || DEFAULT_SECTOR_ID
+        const sectorName = button.sectorName || (chat as any).setor_nome || DEFAULT_SECTOR_NAME
+        const assignment = await assignLeastLoadedAttendant(chat.companyId, sectorId)
         const queuePosition = assignment ? assignment.load + 1 : 1
         const transferReply = assignment
           ? `Perfeito. Vou te encaminhar para ${assignment.employee.name || assignment.employee.email || 'o próximo atendente disponível'}. Sua posição atual na fila é ${queuePosition}.`
@@ -503,6 +495,10 @@ export default function ClientChatPage() {
           botResolved: false,
           employeeId: assignment?.employee?.userId || null,
           employeeName: assignment?.employee?.name || assignment?.employee?.email || null,
+          setor_id: sectorId,
+          setor_nome: sectorName,
+          queueSectorId: sectorId,
+          queueSectorName: sectorName,
           queuePosition,
           lastMessage: transferReply,
           lastMessageAt: serverTimestamp(),
@@ -512,8 +508,8 @@ export default function ClientChatPage() {
         await createNotification({
           recipientCompanyId: chat.companyId,
           recipientUserId: assignment?.employee?.userId,
-          title: 'Cliente aguardando humano',
-          body: `${userData?.fullName || user.displayName || 'Cliente'} foi direcionado para a fila humana no protocolo ${chat.protocolo}.`,
+          title: `Cliente aguardando ${sectorName}`,
+          body: `${userData?.fullName || user.displayName || 'Cliente'} foi direcionado para a fila de ${sectorName} no protocolo ${chat.protocolo}.`,
           type: 'chat',
           actionUrl: `/dashboard/chats?chat=${id}`,
           entityId: id,
@@ -533,7 +529,7 @@ export default function ClientChatPage() {
           employeeId: assignment?.employee?.userId || null,
           employeeName: assignment?.employee?.name || assignment?.employee?.email || null,
           summary: 'BOT encaminhou o atendimento para a fila humana.',
-          metadata: { queuePosition, attempts: currentAttempts },
+          metadata: { queuePosition, attempts: currentAttempts, setor: sectorName },
         })
       }
     } catch {
@@ -575,11 +571,13 @@ export default function ClientChatPage() {
       })
 
       if (button.action === 'queue' || button.action === 'transfer') {
-        const assignment = await assignLeastLoadedAttendant(chat.companyId)
+        const sectorId = button.sectorId || (chat as any).setor_id || (chat as any).queueSectorId || DEFAULT_SECTOR_ID
+        const sectorName = button.sectorName || (chat as any).setor_nome || (chat as any).queueSectorName || DEFAULT_SECTOR_NAME
+        const assignment = await assignLeastLoadedAttendant(chat.companyId, sectorId)
         const queuePosition = assignment ? assignment.load + 1 : 1
         const transferReply = assignment
-          ? `Tudo certo. Vou colocar seu atendimento na fila humana com ${assignment.employee.name || assignment.employee.email || 'o próximo atendente disponível'}. Sua posição atual é ${queuePosition}.`
-          : `Tudo certo. No momento não há atendente livre. Seu atendimento entrou na fila humana com posição ${queuePosition}.`
+          ? `Tudo certo. Vou colocar seu atendimento na fila de ${sectorName} com ${assignment.employee?.name || assignment.employee?.email || 'o próximo atendente disponível'}. Sua posição atual é ${queuePosition}.`
+          : `Tudo certo. No momento não há atendente livre. Seu atendimento entrou na fila de ${sectorName} com posição ${queuePosition}.`
 
         await addDoc(collection(db, 'messages'), {
           chatId: id,
@@ -597,6 +595,10 @@ export default function ClientChatPage() {
           status: 'waiting',
           employeeId: assignment?.employee?.userId || null,
           employeeName: assignment?.employee?.name || assignment?.employee?.email || null,
+          setor_id: sectorId,
+          setor_nome: sectorName,
+          queueSectorId: sectorId,
+          queueSectorName: sectorName,
           queuePosition,
           lastMessage: transferReply,
           lastMessageAt: serverTimestamp(),
@@ -607,8 +609,8 @@ export default function ClientChatPage() {
         await createNotification({
           recipientCompanyId: chat.companyId,
           recipientUserId: assignment?.employee?.userId,
-          title: 'Cliente aguardando humano',
-          body: `${userData?.fullName || user.displayName || 'Cliente'} entrou na fila humana pelo BOT no protocolo ${chat.protocolo}.`,
+          title: `Cliente aguardando ${sectorName}`,
+          body: `${userData?.fullName || user.displayName || 'Cliente'} entrou na fila de ${sectorName} pelo BOT no protocolo ${chat.protocolo}.`,
           type: 'chat',
           actionUrl: `/dashboard/chats?chat=${id}`,
           entityId: id,

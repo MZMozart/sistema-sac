@@ -184,6 +184,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         clientName: userData?.fullName || user.displayName || 'Cliente',
         clientEmail: user.email || '',
         status: 'bot',
+        callState: 'STARTED',
         queuePosition: null,
         priority: 'normal',
         unreadCount: 0,
@@ -301,6 +302,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         callBotVoice: company.settings?.callBotVoice || 'pt-BR',
         recordingRequired: true,
         recordingStatus: 'pending',
+        timeline: [{ evento: 'call_started', timestamp: new Date().toISOString() }],
         createdAt: serverTimestamp(),
       })
 
@@ -313,9 +315,11 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
         clientId: user.uid,
         clientName: userData?.fullName || user.displayName || 'Cliente',
         status: 'bot',
+        callState: 'STARTED',
         queuePosition: null,
         recordingRequired: true,
         recordingStatus: 'pending',
+        timeline: [{ evento: 'call_started', timestamp: new Date().toISOString() }],
         createdAt: serverTimestamp(),
       })
 

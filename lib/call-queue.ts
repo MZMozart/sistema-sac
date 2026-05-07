@@ -1,5 +1,6 @@
 import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { DEFAULT_SECTOR_ID, normalizeSectorId } from '@/lib/sectors'
 
 function toDateValue(value: any) {
   if (!value) return new Date(0)
@@ -49,10 +50,14 @@ export async function rebalanceCallQueue(companyId: string) {
     }))
   })
 
-  waitingCalls.forEach((call, index) => {
-    if (call.queuePosition !== index + 1) {
-      updates.push(updateDoc(doc(db, 'call_sessions', call.id), { queuePosition: index + 1 }))
-      updates.push(updateDoc(doc(db, 'calls', call.callId || call.id), { queuePosition: index + 1 }))
+  const sectorPositions = new Map<string, number>()
+  waitingCalls.forEach((call) => {
+    const sectorId = normalizeSectorId(call.queueSectorId || call.setor_id || DEFAULT_SECTOR_ID)
+    const nextPosition = (sectorPositions.get(sectorId) || 0) + 1
+    sectorPositions.set(sectorId, nextPosition)
+    if (call.queuePosition !== nextPosition || call.queueSectorId !== sectorId) {
+      updates.push(updateDoc(doc(db, 'call_sessions', call.id), { queuePosition: nextPosition, queueSectorId: sectorId }))
+      updates.push(updateDoc(doc(db, 'calls', call.callId || call.id), { queuePosition: nextPosition, queueSectorId: sectorId }))
     }
   })
 

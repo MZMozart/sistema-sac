@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { collection, doc, increment, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { arrayUnion, collection, doc, increment, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ArrowRight, FileText, Headphones, Loader2, MessageSquare, PhoneCall, UserRoundX } from 'lucide-react'
+import { buildSectorOptions, DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 
 type CallSession = {
   id: string
@@ -30,7 +31,12 @@ type CallSession = {
   queuePosition?: number | null
   selectedOptionLabel?: string
   selectedOptionDescription?: string
-  status: 'bot' | 'waiting' | 'ringing' | 'active' | 'ended' | 'completed'
+  status: 'bot' | 'waiting' | 'ringing' | 'active' | 'post_service' | 'ended' | 'completed'
+  callState?: string
+  setor_id?: string | null
+  setor_nome?: string | null
+  queueSectorId?: string | null
+  queueSectorName?: string | null
   createdAt?: any
   recordingUrl?: string | null
   recordingRequired?: boolean
@@ -53,6 +59,14 @@ type AttendantRecord = {
   email?: string
   role?: string
   isActive?: boolean
+  setor_id?: string | null
+  setor_nome?: string | null
+}
+
+type SectorRecord = {
+  id: string
+  nome: string
+  ativo?: boolean
 }
 
 function toDate(value: any) {
@@ -69,6 +83,7 @@ export default function TelephonyPage() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [loading, setLoading] = useState(true)
   const [attendants, setAttendants] = useState<AttendantRecord[]>([])
+  const [sectors, setSectors] = useState<SectorRecord[]>([])
   const [search, setSearch] = useState('')
   const [activePanel, setActivePanel] = useState<'details' | 'chat' | 'transfer'>('details')
   const audioRequestInFlightRef = useRef(false)
@@ -97,6 +112,15 @@ export default function TelephonyPage() {
       rebalanceCallQueue(company.id).catch(() => null)
     }, 30000)
     return () => window.clearInterval(timer)
+  }, [company?.id])
+
+  useEffect(() => {
+    if (!company?.id) return
+    const sectorsQuery = query(collection(db, 'sectors'), where('empresa_id', '==', company.id))
+    const unsubscribe = onSnapshot(sectorsQuery, (snapshot) => {
+      setSectors(snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) } as SectorRecord)))
+    })
+    return () => unsubscribe()
   }, [company?.id])
 
   useEffect(() => {
@@ -131,6 +155,7 @@ export default function TelephonyPage() {
 
   const activeSession = sessions.find((session) => session.id === selectedSessionId) || null
   const nextWaitingSession = filteredSessions[0] || waitingSessions[0] || null
+  const sectorOptions = useMemo(() => buildSectorOptions(sectors), [sectors])
 
   const attendantsWithLoad = attendants
     .map((attendant) => ({
@@ -173,13 +198,25 @@ export default function TelephonyPage() {
       employeeId: user.uid,
       employeeName: userData?.fullName || user.displayName || 'Atendente',
       status: 'ringing',
+      callState: 'IN_SERVICE',
       queuePosition: null,
+      timeline: arrayUnion({
+        evento: 'agent_connected',
+        conteudo: `${userData?.fullName || user.displayName || 'Atendente'} assumiu a ligação.`,
+        timestamp: new Date().toISOString(),
+      }),
     })
     await updateDoc(doc(db, 'calls', session.callId || session.id), {
       employeeId: user.uid,
       employeeName: userData?.fullName || user.displayName || 'Atendente',
       status: 'ringing',
+      callState: 'IN_SERVICE',
       queuePosition: null,
+      timeline: arrayUnion({
+        evento: 'agent_connected',
+        conteudo: `${userData?.fullName || user.displayName || 'Atendente'} assumiu a ligação.`,
+        timestamp: new Date().toISOString(),
+      }),
     })
 
     if (!session.employeeId && company?.id) {
@@ -286,6 +323,48 @@ export default function TelephonyPage() {
     setActivePanel('transfer')
   }
 
+  const transferCallToSector = async (sector: { id: string; nome: string }) => {
+    if (!activeSession) return
+    await updateDoc(doc(db, 'call_sessions', activeSession.id), {
+      employeeId: null,
+      employeeName: null,
+      status: 'waiting',
+      callState: 'TRANSFER_QUEUE',
+      setor_id: sector.id || DEFAULT_SECTOR_ID,
+      setor_nome: sector.nome || DEFAULT_SECTOR_NAME,
+      queueSectorId: sector.id || DEFAULT_SECTOR_ID,
+      queueSectorName: sector.nome || DEFAULT_SECTOR_NAME,
+      queuePosition: 9999,
+      updatedAt: serverTimestamp(),
+    })
+    await updateDoc(doc(db, 'calls', activeSession.callId || activeSession.id), {
+      employeeId: null,
+      employeeName: null,
+      status: 'waiting',
+      callState: 'TRANSFER_QUEUE',
+      setor_id: sector.id || DEFAULT_SECTOR_ID,
+      setor_nome: sector.nome || DEFAULT_SECTOR_NAME,
+      queueSectorId: sector.id || DEFAULT_SECTOR_ID,
+      queueSectorName: sector.nome || DEFAULT_SECTOR_NAME,
+      queuePosition: 9999,
+      updatedAt: serverTimestamp(),
+    })
+    await rebalanceCallQueue(activeSession.companyId)
+    await createAuditLog({
+      companyId: activeSession.companyId,
+      companyName: activeSession.companyName,
+      protocol: activeSession.protocolo,
+      callId: activeSession.callId || activeSession.id,
+      channel: 'call',
+      eventType: 'call_sector_transferred',
+      clientId: activeSession.clientId,
+      clientName: activeSession.clientName || null,
+      summary: `Ligação transferida para o setor ${sector.nome}.`,
+      metadata: { sectorId: sector.id, sectorName: sector.nome },
+    })
+    setSelectedSessionId(null)
+  }
+
   const transferTargets = attendantsWithLoad.filter((attendant) => attendant.userId !== user?.uid)
 
   useEffect(() => {
@@ -308,7 +387,7 @@ export default function TelephonyPage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Ligação em andamento</p>
                   <h2 className="text-xl font-bold">{activeSession.clientName || 'Cliente'}</h2>
-                  <p className="text-xs text-muted-foreground">{activeSession.protocolo} • Motivo: {activeSession.selectedOptionLabel || 'Não informado'}</p>
+                  <p className="text-xs text-muted-foreground">{activeSession.protocolo} • Setor: {activeSession.queueSectorName || activeSession.setor_nome || DEFAULT_SECTOR_NAME} • Motivo: {activeSession.selectedOptionLabel || 'Não informado'}</p>
                 </div>
                 <Badge variant="outline">{activeSession.status}</Badge>
               </div>
@@ -376,6 +455,16 @@ export default function TelephonyPage() {
                 </div>
                 <ScrollArea className="min-h-0 flex-1 px-4 py-4" data-testid="telephony-transfer-panel-scroll-area">
                   <div className="space-y-3">
+                    <div className="rounded-2xl border border-border bg-background/80 p-4">
+                      <p className="mb-3 text-sm font-medium">Transferir para setor</p>
+                      <div className="grid gap-2">
+                        {sectorOptions.map((sector) => (
+                          <Button key={sector.id} type="button" variant="outline" onClick={() => transferCallToSector(sector)} data-testid={`telephony-transfer-sector-${sector.id}`}>
+                            {sector.nome}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                     {transferTargets.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground" data-testid="telephony-transfer-panel-empty-state">
                         Nenhum outro atendente disponível agora.
@@ -405,7 +494,8 @@ export default function TelephonyPage() {
                     <p><strong className="text-foreground">Protocolo:</strong> {activeSession.protocolo}</p>
                     <p><strong className="text-foreground">Cliente:</strong> {activeSession.clientName || 'Cliente'}</p>
                     <p><strong className="text-foreground">E-mail:</strong> {activeSession.clientEmail || 'Sem email'}</p>
-                    <p><strong className="text-foreground">Status:</strong> {activeSession.status}</p>
+                    <p><strong className="text-foreground">Status:</strong> {activeSession.status} • Estado: {activeSession.callState || 'sem estado'}</p>
+                    <p><strong className="text-foreground">Setor:</strong> {activeSession.queueSectorName || activeSession.setor_nome || DEFAULT_SECTOR_NAME}</p>
                     <p><strong className="text-foreground">Data e hora:</strong> {toDate(activeSession.createdAt).toLocaleString('pt-BR')}</p>
                     <p><strong className="text-foreground">Atendente:</strong> {activeSession.employeeName || 'Ainda não assumida'}</p>
                     <p><strong className="text-foreground">Ações registradas:</strong> Gravação: {activeSession.recordingUrl ? 'disponível' : activeSession.recordingStatus || 'pendente'} • Transferências: {activeSession.transferCount || 0} • Silêncio/mute: {activeSession.muteDurationSeconds || activeSession.muteDuration || 0}s</p>
@@ -432,7 +522,7 @@ export default function TelephonyPage() {
                           </div>
                           <Badge variant="outline">Fila {session.queuePosition || '-'}</Badge>
                         </div>
-                        <p className="mt-2 text-sm text-muted-foreground">Motivo: {session.selectedOptionLabel || session.selectedOptionDescription || 'Não informado'}</p>
+                        <p className="mt-2 text-sm text-muted-foreground">Setor: {session.queueSectorName || session.setor_nome || DEFAULT_SECTOR_NAME} • Motivo: {session.selectedOptionLabel || session.selectedOptionDescription || 'Não informado'}</p>
                       </div>
                     ))}
                   </div>
@@ -511,7 +601,7 @@ export default function TelephonyPage() {
                       </div>
                       <Badge variant="outline">Fila {session.queuePosition || '-'}</Badge>
                     </div>
-                    <p className="mt-2 text-sm text-muted-foreground">Motivo: {session.selectedOptionLabel || session.selectedOptionDescription || 'Não informado'}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">Setor: {session.queueSectorName || session.setor_nome || DEFAULT_SECTOR_NAME} • Motivo: {session.selectedOptionLabel || session.selectedOptionDescription || 'Não informado'}</p>
                   </div>
                 ))}
               </div>

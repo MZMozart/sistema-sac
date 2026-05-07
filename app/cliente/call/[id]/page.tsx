@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/contexts/auth-context'
 import { LiveCallRoom } from '@/components/calls/live-call-room'
@@ -13,6 +13,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
 import { rebalanceCallQueue } from '@/lib/call-queue'
+import { assignLeastLoadedAttendant } from '@/lib/attendant-assignment'
+import { DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 import { ArrowLeft, Loader2, Phone } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -36,6 +38,7 @@ export default function ClientCallPage() {
   const [currentVisualCallNodeId, setCurrentVisualCallNodeId] = useState<string | null>(null)
   const spokenRef = useRef(false)
   const autoStartedRef = useRef(false)
+  const postServicePromptRef = useRef(false)
   const speakingRef = useRef(false)
   const speechQueueRef = useRef<Promise<void>>(Promise.resolve())
   const localCallStreamRef = useRef<MediaStream | null>(null)
@@ -112,6 +115,8 @@ export default function ClientCallPage() {
         speech: node.data?.text || `Você selecionou a opção ${node.data?.digit || '1'}.`,
         action: node.data?.action || 'info',
         actionLabel: node.data?.actionLabel || node.data?.title || null,
+        sectorId: node.data?.sectorId || null,
+        sectorName: node.data?.sectorName || null,
         visualNodeId: node.id,
       }))
   }, [currentVisualCallNode, visualCallEdges, visualCallNodes])
@@ -274,13 +279,45 @@ export default function ClientCallPage() {
 
     spokenRef.current = true
     const timer = window.setTimeout(() => {
-      speakText(callBotSpeech).catch(() => {
-        fallbackSpeakText(callBotSpeech)
-      })
+      setDoc(doc(db, 'call_sessions', id), {
+        callState: 'BOT_FLOW',
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      setDoc(doc(db, 'calls', session.callId || id), {
+        callState: 'BOT_FLOW',
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null)
+      speakText(callBotSpeech)
+        .then(() => Promise.all([
+          setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }),
+          setDoc(doc(db, 'calls', session.callId || id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }),
+        ]).then(() => undefined))
+        .catch(() => {
+          fallbackSpeakText(callBotSpeech)
+        })
     }, 900)
 
     return () => window.clearTimeout(timer)
   }, [audioEnabled, callBotSpeech, session])
+
+  useEffect(() => {
+    if (!audioEnabled || !session || session.callState !== 'POST_SERVICE' || postServicePromptRef.current) return
+    postServicePromptRef.current = true
+    const prompt = 'Seu atendimento foi resolvido? Digite 1 para sim ou 2 para não.'
+    setDoc(doc(db, 'call_sessions', id), {
+      callState: 'WAITING_INPUT',
+      timeline: arrayUnion({ evento: 'bot_speech', conteudo: prompt, timestamp: new Date().toISOString() }),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => null)
+    setDoc(doc(db, 'calls', session.callId || id), {
+      callState: 'WAITING_INPUT',
+      timeline: arrayUnion({ evento: 'bot_speech', conteudo: prompt, timestamp: new Date().toISOString() }),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => null)
+    speakText(prompt).catch(() => null)
+  }, [audioEnabled, id, session])
 
   useEffect(() => {
     return () => {
@@ -297,10 +334,21 @@ export default function ClientCallPage() {
     const optionDigit = String(option?.digit || '')
     const optionLabel = option?.label || option?.actionLabel || option?.description || (optionDigit ? `Opção ${optionDigit}` : 'Atendimento humano')
     const queueReason = optionLabel || 'Atendimento humano'
+    const sectorId = option?.sectorId || option?.setor_id || session.setor_id || DEFAULT_SECTOR_ID
+    const sectorName = option?.sectorName || option?.setor_nome || session.setor_nome || DEFAULT_SECTOR_NAME
+    const assignment = await assignLeastLoadedAttendant(session.companyId, 'call', sectorId)
 
     await setDoc(doc(db, 'call_sessions', id), {
       status: 'waiting',
+      callState: 'TRANSFER_QUEUE',
+      timeline: arrayUnion({ evento: 'queue_entered', setor: sectorName, motivo: queueReason, timestamp: new Date().toISOString() }),
       queuePosition: 9999,
+      setor_id: sectorId,
+      setor_nome: sectorName,
+      queueSectorId: sectorId,
+      queueSectorName: sectorName,
+      suggestedEmployeeId: assignment?.employee?.userId || null,
+      suggestedEmployeeName: assignment?.employee?.name || assignment?.employee?.email || null,
       selectedOptionDigit: optionDigit || null,
       selectedOptionLabel: queueReason,
       selectedOptionDescription: option?.speech || option?.description || queueReason,
@@ -310,7 +358,15 @@ export default function ClientCallPage() {
     }, { merge: true })
     await setDoc(doc(db, 'calls', session.callId || id), {
       status: 'waiting',
+      callState: 'TRANSFER_QUEUE',
+      timeline: arrayUnion({ evento: 'queue_entered', setor: sectorName, motivo: queueReason, timestamp: new Date().toISOString() }),
       queuePosition: 9999,
+      setor_id: sectorId,
+      setor_nome: sectorName,
+      queueSectorId: sectorId,
+      queueSectorName: sectorName,
+      suggestedEmployeeId: assignment?.employee?.userId || null,
+      suggestedEmployeeName: assignment?.employee?.name || assignment?.employee?.email || null,
       selectedOptionDigit: optionDigit || null,
       selectedOptionLabel: queueReason,
       selectedOptionDescription: option?.speech || option?.description || queueReason,
@@ -321,8 +377,9 @@ export default function ClientCallPage() {
     await rebalanceCallQueue(session.companyId)
     await createNotification({
       recipientCompanyId: session.companyId,
-      title: 'Cliente entrou na fila de ligação',
-      body: `${userData?.fullName || user?.displayName || session.clientName || 'Cliente'} pediu atendimento humano no protocolo ${session.protocolo}. Motivo: ${queueReason}.`,
+      recipientUserId: assignment?.employee?.userId || undefined,
+      title: `Cliente entrou na fila de ${sectorName}`,
+      body: `${userData?.fullName || user?.displayName || session.clientName || 'Cliente'} pediu atendimento humano no protocolo ${session.protocolo}. Setor: ${sectorName}. Motivo: ${queueReason}.`,
       type: 'call',
       actionUrl: '/dashboard/telephony',
       entityId: id,
@@ -337,8 +394,8 @@ export default function ClientCallPage() {
       eventType: 'call_queue_entered',
       clientId: user?.uid || session.clientId,
       clientName: userData?.fullName || user?.displayName || session.clientName || 'Cliente',
-      summary: `Cliente entrou na fila de atendimento humano. Motivo: ${queueReason}.`,
-      metadata: { digit: optionDigit || null, label: queueReason },
+      summary: `Cliente entrou na fila de atendimento humano do setor ${sectorName}. Motivo: ${queueReason}.`,
+      metadata: { digit: optionDigit || null, label: queueReason, sectorId, sectorName, suggestedEmployeeId: assignment?.employee?.userId || null },
     })
     speakText('Certo. Vou te colocar na fila para falar com um atendente. Aguarde na linha.').catch(() => null)
   }
@@ -347,17 +404,21 @@ export default function ClientCallPage() {
     if (!session) return
     await setDoc(doc(db, 'call_sessions', id), {
       status: 'ended',
+      callState: 'FINISHED',
       endedAt: serverTimestamp(),
       closedBy: 'bot',
       queuePosition: null,
       updatedAt: serverTimestamp(),
+      timeline: arrayUnion({ evento: 'call_finished', encerrado_por: 'bot', timestamp: new Date().toISOString() }),
     }, { merge: true })
     await setDoc(doc(db, 'calls', session.callId || id), {
       status: 'ended',
+      callState: 'FINISHED',
       endedAt: serverTimestamp(),
       closedBy: 'bot',
       queuePosition: null,
       updatedAt: serverTimestamp(),
+      timeline: arrayUnion({ evento: 'call_finished', encerrado_por: 'bot', timestamp: new Date().toISOString() }),
     }, { merge: true })
     await createAuditLog({
       companyId: session.companyId,
@@ -406,6 +467,8 @@ export default function ClientCallPage() {
         action,
         label: targetNode.data?.actionLabel || targetNode.data?.title || originOption.label,
         actionLabel: targetNode.data?.actionLabel || targetNode.data?.title || originOption.actionLabel,
+        sectorId: targetNode.data?.sectorId || originOption.sectorId || null,
+        sectorName: targetNode.data?.sectorName || originOption.sectorName || null,
       }
       if (action === 'transfer') {
         await enterHumanQueue(actionOption)
@@ -440,6 +503,8 @@ export default function ClientCallPage() {
         speech: targetNode.data?.text,
         action: targetNode.data?.action || 'info',
         actionLabel: targetNode.data?.actionLabel || targetNode.data?.title,
+        sectorId: targetNode.data?.sectorId || null,
+        sectorName: targetNode.data?.sectorName || null,
         visualNodeId: targetNode.id,
       })
     }
@@ -452,6 +517,8 @@ export default function ClientCallPage() {
     const optionDigit = String(option?.digit || digitNode.data?.digit || '')
     const optionLabel = option?.label || digitNode.data?.actionLabel || digitNode.data?.title || `Tecla ${optionDigit}`
     const spokenText = option?.speech || digitNode.data?.text || `Você selecionou a opção ${optionDigit}.`
+    const sectorId = option?.sectorId || digitNode.data?.sectorId || null
+    const sectorName = option?.sectorName || digitNode.data?.sectorName || null
 
     await updateDoc(doc(db, 'call_sessions', id), {
       selectedOptionDigit: optionDigit || null,
@@ -459,6 +526,8 @@ export default function ClientCallPage() {
       selectedOptionDescription: spokenText || null,
       selectedOptionAt: serverTimestamp(),
       currentVisualCallNodeId: digitNode.id,
+      timeline: arrayUnion({ evento: 'dtmf_pressed', tecla: optionDigit || null, label: optionLabel || null, timestamp: new Date().toISOString() }),
+      ...(sectorId ? { setor_id: sectorId, setor_nome: sectorName || DEFAULT_SECTOR_NAME } : {}),
     })
     await setDoc(doc(db, 'calls', session.callId || id), {
       selectedOptionDigit: optionDigit || null,
@@ -466,6 +535,8 @@ export default function ClientCallPage() {
       selectedOptionDescription: spokenText || null,
       selectedOptionAt: serverTimestamp(),
       currentVisualCallNodeId: digitNode.id,
+      timeline: arrayUnion({ evento: 'dtmf_pressed', tecla: optionDigit || null, label: optionLabel || null, timestamp: new Date().toISOString() }),
+      ...(sectorId ? { setor_id: sectorId, setor_nome: sectorName || DEFAULT_SECTOR_NAME } : {}),
     }, { merge: true })
     await createAuditLog({
       companyId: session.companyId,
@@ -479,7 +550,7 @@ export default function ClientCallPage() {
       employeeId: session.employeeId || null,
       employeeName: session.employeeName || null,
       summary: `Cliente selecionou a tecla ${optionDigit || '-'} no fluxo visual da ligação.`,
-      metadata: { digit: optionDigit || null, label: optionLabel || null, action: digitNode.data?.action || null, visualNodeId: digitNode.id },
+      metadata: { digit: optionDigit || null, label: optionLabel || null, action: digitNode.data?.action || null, visualNodeId: digitNode.id, sectorId, sectorName },
     })
 
     if (spokenText) await speakText(spokenText)
@@ -487,13 +558,13 @@ export default function ClientCallPage() {
     const targetId = visualCallEdges.find((edge: any) => edge?.source === digitNode.id)?.target
     const targetNode = visualCallNodes.find((node: any) => node?.id === targetId)
     if (targetNode) {
-      await executeVisualTarget(targetNode, { ...option, label: optionLabel, speech: spokenText })
+      await executeVisualTarget(targetNode, { ...option, label: optionLabel, speech: spokenText, sectorId, sectorName })
       return true
     }
 
     const action = digitNode.data?.action || option.action || 'info'
     if (action === 'transfer') {
-      await enterHumanQueue({ ...option, label: optionLabel, speech: spokenText, action: 'transfer' })
+      await enterHumanQueue({ ...option, label: optionLabel, speech: spokenText, action: 'transfer', sectorId, sectorName })
       return true
     }
     if (action === 'end') {
@@ -514,6 +585,33 @@ export default function ClientCallPage() {
     const optionLabel = option?.label || (optionDigit ? `Tecla ${optionDigit}` : 'Opção')
     setSelectedOption(optionDigit || String(optionLabel))
     try {
+      if (session.callState === 'WAITING_INPUT' && session.status === 'post_service') {
+        await setDoc(doc(db, 'call_sessions', id), {
+          timeline: arrayUnion({ evento: 'post_service_response', resposta: optionDigit || null, timestamp: new Date().toISOString() }),
+          updatedAt: serverTimestamp(),
+        }, { merge: true })
+        await setDoc(doc(db, 'calls', session.callId || id), {
+          timeline: arrayUnion({ evento: 'post_service_response', resposta: optionDigit || null, timestamp: new Date().toISOString() }),
+          updatedAt: serverTimestamp(),
+        }, { merge: true })
+        if (optionDigit === '1') {
+          await speakText('Obrigado. Vou encerrar a ligação e liberar sua avaliação.')
+          await finishCallByBot()
+          return
+        }
+        if (optionDigit === '2') {
+          postServicePromptRef.current = false
+          spokenRef.current = false
+          setCurrentVisualCallNodeId(callGreetingNode?.id || null)
+          await setDoc(doc(db, 'call_sessions', id), { status: 'bot', callState: 'BOT_FLOW', updatedAt: serverTimestamp() }, { merge: true })
+          await setDoc(doc(db, 'calls', session.callId || id), { status: 'bot', callState: 'BOT_FLOW', updatedAt: serverTimestamp() }, { merge: true })
+          await speakText(callBotSpeech || 'Vou voltar ao menu inicial.')
+          return
+        }
+        await speakText('Digite 1 para sim ou 2 para não.')
+        return
+      }
+
       if (option?.visualNodeId && await handleVisualCallOption(option)) return
 
       if (pendingHumanConfirmation) {

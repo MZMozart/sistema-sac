@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { db, storage } from '@/lib/firebase'
 import { createNotification } from '@/lib/notifications'
@@ -65,7 +65,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const recordingFinalizedRef = useRef(false)
   const manualEndingRef = useRef(false)
 
-  const [status, setStatus] = useState<'connecting' | 'waiting' | 'ringing' | 'active' | 'ended'>('connecting')
+  const [status, setStatus] = useState<'connecting' | 'waiting' | 'ringing' | 'active' | 'post_service' | 'ended'>('connecting')
   const [muted, setMuted] = useState(false)
   const [mutedElapsed, setMutedElapsed] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -518,6 +518,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           if (data?.status === 'ended') {
             setStatus('ended')
           }
+          if (data?.status === 'post_service') {
+            setStatus('post_service')
+          }
         })
         cleanupFnsRef.current.push(unsubscribeRoom)
 
@@ -572,6 +575,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
           if (!isCurrentRun()) return
           if (snapshot.data()?.status === 'ended') {
             setStatus('ended')
+          }
+          if (snapshot.data()?.status === 'post_service') {
+            setStatus('post_service')
           }
         })
         cleanupFnsRef.current.push(unsubscribeRoom)
@@ -671,8 +677,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     manualEndingRef.current = true
     setStatus('ended')
 
+    const nextStatus = mode === 'agent' ? 'post_service' : 'completed'
+    const nextCallState = mode === 'agent' ? 'POST_SERVICE' : 'FINISHED'
     const baseEndPayload = {
-      status: 'completed',
+      status: nextStatus,
+      callState: nextCallState,
       duration: totalDuration,
       muteDuration: mutedDurationRef.current,
       [`${mode === 'caller' ? 'client' : 'employee'}DisconnectedAt`]: serverTimestamp(),
@@ -685,12 +694,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       endedByName: currentUserName,
       updatedAt: serverTimestamp(),
       endedAt: serverTimestamp(),
+      timeline: arrayUnion({ evento: mode === 'agent' ? 'agent_finished' : 'call_finished', encerrado_por: mode === 'agent' ? 'atendente' : 'cliente', timestamp: new Date().toISOString() }),
     }
 
     await Promise.all([
       setDoc(roomRef, {
         ...baseEndPayload,
-        status: 'ended',
+        status: mode === 'agent' ? 'post_service' : 'ended',
         endedBy: currentUserId,
       }, { merge: true }).catch(() => null),
       setDoc(callRef, {

@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Loader2, Search, Shield, Trash2, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { db, firebaseConfig } from '@/lib/firebase'
+import { buildSectorOptions, DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 
 type EmployeeRecord = {
   id: string
@@ -31,6 +32,15 @@ type EmployeeRecord = {
   totalChats?: number
   totalCalls?: number
   averageRating?: number
+  setor_id?: string | null
+  setor_nome?: string | null
+}
+
+type SectorRecord = {
+  id: string
+  nome: string
+  ativo: boolean
+  empresa_id: string
 }
 
 const emptyForm = {
@@ -38,6 +48,8 @@ const emptyForm = {
   email: '',
   phone: '',
   role: 'employee' as EmployeeRecord['role'],
+  setor_id: DEFAULT_SECTOR_ID,
+  setor_nome: DEFAULT_SECTOR_NAME,
   temporaryPassword: '',
   permissions: {
     canManageEmployees: false,
@@ -91,6 +103,8 @@ const daysOfWeek = [
 export default function EmployeesPage() {
   const { user, company, loading: authLoading } = useAuth()
   const [employees, setEmployees] = useState<EmployeeRecord[]>([])
+  const [sectors, setSectors] = useState<SectorRecord[]>([])
+  const [newSectorName, setNewSectorName] = useState('')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -128,6 +142,24 @@ export default function EmployeesPage() {
     return () => unsubscribe()
   }, [authLoading, company?.id])
 
+  useEffect(() => {
+    if (!company?.id) {
+      setSectors([])
+      return
+    }
+
+    const sectorsQuery = query(collection(db, 'sectors'), where('empresa_id', '==', company.id))
+    const unsubscribe = onSnapshot(sectorsQuery, (snapshot) => {
+      const rows = snapshot.docs
+        .map((item) => ({ id: item.id, ...(item.data() as any) } as SectorRecord))
+        .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      setSectors(rows)
+    })
+    return () => unsubscribe()
+  }, [company?.id])
+
+  const sectorOptions = useMemo(() => buildSectorOptions(sectors), [sectors])
+
   const filteredEmployees = useMemo(
     () =>
       employees.filter((employee) =>
@@ -163,11 +195,14 @@ export default function EmployeesPage() {
       const now = new Date().toISOString()
 
       if (isEditing && editingEmployee) {
+        const selectedSector = sectorOptions.find((sector) => sector.id === form.setor_id)
         await Promise.all([
           updateDoc(doc(db, 'employees', editingEmployee.id), {
             name: form.name,
             phone: form.phone || '',
             role: form.role,
+            setor_id: selectedSector?.id || DEFAULT_SECTOR_ID,
+            setor_nome: selectedSector?.nome || DEFAULT_SECTOR_NAME,
             permissions: form.permissions,
             workSchedule: form.workSchedule,
           }),
@@ -176,6 +211,8 @@ export default function EmployeesPage() {
             fullName: form.name,
             phone: form.phone || '',
             role: form.role,
+            setor_id: selectedSector?.id || DEFAULT_SECTOR_ID,
+            setor_nome: selectedSector?.nome || DEFAULT_SECTOR_NAME,
           }),
         ])
       } else {
@@ -201,6 +238,7 @@ export default function EmployeesPage() {
         }
 
         const employeeId = `${company.id}_${data.uid}`
+        const selectedSector = sectorOptions.find((sector) => sector.id === form.setor_id)
         const basePermissions = {
           canViewDashboard: form.role !== 'employee',
           canViewAllChats: true,
@@ -220,6 +258,8 @@ export default function EmployeesPage() {
             accountType: 'pj',
             role: form.role,
             companyId: company.id,
+            setor_id: selectedSector?.id || DEFAULT_SECTOR_ID,
+            setor_nome: selectedSector?.nome || DEFAULT_SECTOR_NAME,
             createdAt: now,
             emailVerified: false,
             phoneVerified: false,
@@ -235,6 +275,8 @@ export default function EmployeesPage() {
             email: form.email,
             phone: data.phone || form.phone || '',
             role: form.role,
+            setor_id: selectedSector?.id || DEFAULT_SECTOR_ID,
+            setor_nome: selectedSector?.nome || DEFAULT_SECTOR_NAME,
             isActive: true,
             permissions: basePermissions,
             workSchedule: form.workSchedule,
@@ -279,6 +321,33 @@ export default function EmployeesPage() {
       toast.error(error?.message || 'Erro ao salvar funcionário.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const createSector = async () => {
+    if (!company?.id || !newSectorName.trim()) return
+    try {
+      await addDoc(collection(db, 'sectors'), {
+        nome: newSectorName.trim(),
+        empresa_id: company.id,
+        ativo: true,
+        created_at: new Date().toISOString(),
+      })
+      setNewSectorName('')
+      toast.success('Setor criado.')
+    } catch {
+      toast.error('Não foi possível criar o setor.')
+    }
+  }
+
+  const toggleSector = async (sector: SectorRecord) => {
+    try {
+      await updateDoc(doc(db, 'sectors', sector.id), {
+        ativo: sector.ativo === false,
+        updated_at: new Date().toISOString(),
+      })
+    } catch {
+      toast.error('Não foi possível alterar este setor.')
     }
   }
 
@@ -378,6 +447,29 @@ export default function EmployeesPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Setor principal</Label>
+                <Select
+                  value={form.setor_id}
+                  onValueChange={(value) => {
+                    const selectedSector = sectorOptions.find((sector) => sector.id === value)
+                    setForm((current) => ({
+                      ...current,
+                      setor_id: selectedSector?.id || DEFAULT_SECTOR_ID,
+                      setor_nome: selectedSector?.nome || DEFAULT_SECTOR_NAME,
+                    }))
+                  }}
+                >
+                  <SelectTrigger data-testid="employees-form-sector">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sectorOptions.map((sector) => (
+                      <SelectItem key={sector.id} value={sector.id}>{sector.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               {!editingEmployee ? (
                 <div className="space-y-2">
                   <Label>Senha temporária</Label>
@@ -427,6 +519,44 @@ export default function EmployeesPage() {
 
       <Card className="glass border-border/80">
         <CardHeader>
+          <CardTitle>Setores de atendimento</CardTitle>
+          <CardDescription>Crie setores para o BOT direcionar clientes no chat e na ligação.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Input
+              value={newSectorName}
+              onChange={(event) => setNewSectorName(event.target.value)}
+              placeholder="Ex: Financeiro, Suporte, Comercial"
+              data-testid="employees-new-sector-input"
+            />
+            <Button onClick={createSector} disabled={!newSectorName.trim()} data-testid="employees-create-sector-button">
+              Criar setor
+            </Button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {sectorOptions.map((sector) => {
+              const original = sectors.find((item) => item.id === sector.id)
+              return (
+                <div key={sector.id} className="rounded-2xl border border-border bg-card/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{sector.nome}</p>
+                      <p className="text-xs text-muted-foreground">{sector.id === DEFAULT_SECTOR_ID ? 'Fila padrão' : original?.ativo === false ? 'Inativo' : 'Ativo'}</p>
+                    </div>
+                    {sector.id !== DEFAULT_SECTOR_ID && original ? (
+                      <Switch checked={original.ativo !== false} onCheckedChange={() => toggleSector(original)} data-testid={`employees-sector-toggle-${sector.id}`} />
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="glass border-border/80">
+        <CardHeader>
           <CardTitle>Equipe conectada</CardTitle>
           <CardDescription>Todos os registros abaixo vêm do Firebase e das métricas reais acumuladas.</CardDescription>
         </CardHeader>
@@ -458,7 +588,7 @@ export default function EmployeesPage() {
                         <Badge variant={employee.role === 'manager' ? 'default' : 'outline'}>{employee.role === 'manager' ? 'Gerente' : employee.role === 'owner' ? 'Dono' : 'Funcionário'}</Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">{employee.email}</p>
-                      <p className="text-xs text-muted-foreground">{employee.phone || 'Sem telefone'}</p>
+                      <p className="text-xs text-muted-foreground">{employee.phone || 'Sem telefone'} • Setor: {employee.setor_nome || DEFAULT_SECTOR_NAME}</p>
                     </div>
                   </div>
 
@@ -494,6 +624,8 @@ export default function EmployeesPage() {
                               email: employee.email,
                               phone: employee.phone,
                               role: employee.role,
+                              setor_id: employee.setor_id || DEFAULT_SECTOR_ID,
+                              setor_nome: employee.setor_nome || DEFAULT_SECTOR_NAME,
                               temporaryPassword: '',
                               permissions: employee.permissions || emptyForm.permissions,
                               workSchedule: employee.workSchedule || emptyForm.workSchedule,

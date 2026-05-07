@@ -19,7 +19,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { doc, updateDoc } from 'firebase/firestore'
+import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore'
 import { AlertTriangle, Bot, CheckCircle2, Hash, Link2, MessageSquare, MousePointer2, PhoneCall, Plus, Save, Trash2, Type, Workflow, Zap } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { db } from '@/lib/firebase'
@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { createDefaultCallDigits, createEmptyChatButton, createEmptyChatMessage, parseCallDigits, parseChatFlow, type CallDigitAction, type CallDigitConfig, type ChatFlowButton, type ChatFlowButtonAction, type ChatFlowMessage } from '@/lib/bot-flow'
+import { buildSectorOptions, DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 import { toast } from 'sonner'
 
 type BotSection = 'chat' | 'call'
@@ -38,6 +39,7 @@ type VisualButton = ChatFlowButton & {
 }
 
 type VisualCallOption = CallDigitConfig
+type SectorOption = { id: string; nome: string }
 
 type VisualNodeData = {
   kind: VisualKind
@@ -46,8 +48,11 @@ type VisualNodeData = {
   action?: ChatFlowButtonAction | CallDigitAction | 'repeat'
   actionLabel?: string | null
   digit?: string
+  sectorId?: string | null
+  sectorName?: string | null
   buttons?: VisualButton[]
   options?: VisualCallOption[]
+  sectors?: SectorOption[]
   onUpdate?: (nodeId: string, patch: Partial<VisualNodeData>) => void
   onRemove?: (nodeId: string) => void
 }
@@ -115,6 +120,8 @@ function createVisualNode(kind: VisualKind, position = { x: 120, y: 120 }): Node
   if (kind === 'chatAction') {
     base.data.action = 'queue'
     base.data.actionLabel = 'Falar com atendente'
+    base.data.sectorId = DEFAULT_SECTOR_ID
+    base.data.sectorName = DEFAULT_SECTOR_NAME
   }
   if (kind === 'callGreeting') {
     base.data.text = 'Olá, bem-vindo. Digite uma das opções para continuar.'
@@ -139,6 +146,8 @@ function createVisualNode(kind: VisualKind, position = { x: 120, y: 120 }): Node
   if (kind === 'callAction') {
     base.data.action = 'transfer'
     base.data.actionLabel = 'Falar com atendente'
+    base.data.sectorId = DEFAULT_SECTOR_ID
+    base.data.sectorName = DEFAULT_SECTOR_NAME
   }
 
   return base
@@ -148,6 +157,14 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
   const update = (patch: Partial<VisualNodeData>) => data.onUpdate?.(id, patch)
   const updateButton = (buttonId: string, patch: Partial<VisualButton>) => {
     update({ buttons: (data.buttons || []).map((button) => button.id === buttonId ? { ...button, ...patch } : button) })
+  }
+  const updateSector = (sectorId: string) => {
+    const sector = (data.sectors || []).find((item) => item.id === sectorId)
+    update({ sectorId, sectorName: sector?.nome || DEFAULT_SECTOR_NAME })
+  }
+  const updateButtonSector = (buttonId: string, sectorId: string) => {
+    const sector = (data.sectors || []).find((item) => item.id === sectorId)
+    updateButton(buttonId, { sectorId, sectorName: sector?.nome || DEFAULT_SECTOR_NAME })
   }
   const updateOption = (digit: string, patch: Partial<VisualCallOption>) => {
     update({ options: (data.options || []).map((option) => option.digit === digit ? { ...option, ...patch } : option) })
@@ -241,6 +258,20 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
                 <option value="action">Executar ação interna</option>
               </select>
             </div>
+            {data.action === 'transfer' ? (
+              <div className="space-y-2">
+                <Label>Setor de atendimento</Label>
+                <select
+                  value={data.sectorId || DEFAULT_SECTOR_ID}
+                  onChange={(event) => updateSector(event.target.value)}
+                  className="nodrag h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {(data.sectors || [{ id: DEFAULT_SECTOR_ID, nome: DEFAULT_SECTOR_NAME }]).map((sector) => (
+                    <option key={sector.id} value={sector.id}>{sector.nome}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <p className="text-xs text-muted-foreground">Você pode repetir o mesmo número em outros pontos do fluxo. O sistema considera o contexto atual da ligação.</p>
           </div>
         ) : null}
@@ -299,6 +330,17 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
                     <option value="close">Encerrar conversa</option>
                     <option value="action">Executar ação</option>
                   </select>
+                  {button.action === 'queue' ? (
+                    <select
+                      value={button.sectorId || DEFAULT_SECTOR_ID}
+                      onChange={(event) => updateButtonSector(button.id, event.target.value)}
+                      className="nodrag mt-2 h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {(data.sectors || [{ id: DEFAULT_SECTOR_ID, nome: DEFAULT_SECTOR_NAME }]).map((sector) => (
+                        <option key={sector.id} value={sector.id}>{sector.nome}</option>
+                      ))}
+                    </select>
+                  ) : null}
                   <button
                     type="button"
                     className="nodrag absolute right-1 top-1 rounded p-1 text-muted-foreground hover:text-destructive"
@@ -373,6 +415,20 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
               className="nodrag"
               placeholder="Descrição interna da ação"
             />
+            {String(data.action || '').includes('queue') || String(data.action || '').includes('transfer') ? (
+              <div className="space-y-2">
+                <Label>Setor de atendimento</Label>
+                <select
+                  value={data.sectorId || DEFAULT_SECTOR_ID}
+                  onChange={(event) => updateSector(event.target.value)}
+                  className="nodrag h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {(data.sectors || [{ id: DEFAULT_SECTOR_ID, nome: DEFAULT_SECTOR_NAME }]).map((sector) => (
+                    <option key={sector.id} value={sector.id}>{sector.nome}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -382,8 +438,8 @@ function VisualBotNode({ id, data, selected }: NodeProps<Node<VisualNodeData>>) 
   )
 }
 
-function applyNodeHandlers(nodes: Node<VisualNodeData>[], onUpdate: VisualNodeData['onUpdate'], onRemove: VisualNodeData['onRemove']) {
-  return nodes.map((node) => ({ ...node, data: { ...node.data, onUpdate, onRemove } }))
+function applyNodeHandlers(nodes: Node<VisualNodeData>[], onUpdate: VisualNodeData['onUpdate'], onRemove: VisualNodeData['onRemove'], sectors: SectorOption[] = []) {
+  return nodes.map((node) => ({ ...node, data: { ...node.data, onUpdate, onRemove, sectors } }))
 }
 
 function createDefaultChatVisualFlow(messages: ChatFlowMessage[]) {
@@ -433,6 +489,8 @@ function createDefaultCallVisualFlow(greeting: string, digits: CallDigitConfig[]
       text: digit.speech,
       action: digit.action,
       actionLabel: digit.label,
+      sectorId: digit.sectorId || DEFAULT_SECTOR_ID,
+      sectorName: digit.sectorName || DEFAULT_SECTOR_NAME,
     },
   }))
   return {
@@ -458,6 +516,8 @@ function normalizeCallVisualFlow(flow: { nodes?: Node<VisualNodeData>[]; edges?:
       text: digit.speech,
       action: digit.action,
       actionLabel: digit.label,
+      sectorId: digit.sectorId || DEFAULT_SECTOR_ID,
+      sectorName: digit.sectorName || DEFAULT_SECTOR_NAME,
     },
   }))
   const incomingEdges = rawEdges.filter((edge) => edge.target === menuNode.id)
@@ -485,7 +545,7 @@ function createVisualEdge(source: string, target: string, sourceHandle?: string 
 
 function stripHandlers(nodes: Node<VisualNodeData>[]) {
   const stripped = nodes.map((node) => {
-    const { onUpdate, onRemove, ...data } = node.data
+    const { onUpdate, onRemove, sectors, ...data } = node.data
     return { ...node, data }
   })
   return removeUndefinedDeep(stripped) as Node<VisualNodeData>[]
@@ -532,10 +592,18 @@ function targetActionForChat(nodes: Node<VisualNodeData>[], targetId: string | n
       action,
       targetMessageId: null,
       actionLabel: fallback.actionLabel || (action === 'queue' ? 'Falar com atendente' : action === 'close' ? 'Encerrar conversa' : null),
+      sectorId: fallback.sectorId || null,
+      sectorName: fallback.sectorName || null,
     }
   }
   if (target.data.kind === 'chatAction') {
-    return { action: (target.data.action || 'queue') as ChatFlowButtonAction, targetMessageId: null, actionLabel: target.data.actionLabel || target.data.title || null }
+    return {
+      action: (target.data.action || 'queue') as ChatFlowButtonAction,
+      targetMessageId: null,
+      actionLabel: target.data.actionLabel || target.data.title || null,
+      sectorId: target.data.sectorId || null,
+      sectorName: target.data.sectorName || null,
+    }
   }
   return { action: 'goto' as ChatFlowButtonAction, targetMessageId: target.id, actionLabel: null }
 }
@@ -577,6 +645,8 @@ function buildCallDigits(nodes: Node<VisualNodeData>[], edges: Edge[]): CallDigi
       action: node.data.action === 'repeat' ? 'goto' : ((node.data.action || 'info') as CallDigitAction),
       targetDigit: null,
       actionLabel: node.data.actionLabel || node.data.title || null,
+      sectorId: node.data.sectorId || null,
+      sectorName: node.data.sectorName || null,
     }))
   }
   const menu = nodes.find((node) => node.data.kind === 'callMenu')
@@ -589,6 +659,8 @@ function buildCallDigits(nodes: Node<VisualNodeData>[], edges: Edge[]): CallDigi
         ...option,
         action: target.data.action === 'repeat' ? 'goto' : ((target.data.action || option.action) as CallDigitAction),
         actionLabel: target.data.actionLabel || target.data.title || option.actionLabel || null,
+        sectorId: target.data.sectorId || option.sectorId || null,
+        sectorName: target.data.sectorName || option.sectorName || null,
       }
     }
     if (target?.data.kind === 'callText') {
@@ -680,6 +752,7 @@ export default function BotPage() {
   const [botName, setBotName] = useState('AtendePro BOT')
   const [validationMessage, setValidationMessage] = useState<string | null>(null)
   const [flowInstance, setFlowInstance] = useState<any>(null)
+  const [sectorOptions, setSectorOptions] = useState<SectorOption[]>([{ id: DEFAULT_SECTOR_ID, nome: DEFAULT_SECTOR_NAME }])
   const [chatNodes, setChatNodes, onChatNodesChange] = useNodesState<Node<VisualNodeData>>([])
   const [chatEdges, setChatEdges, onChatEdgesChange] = useEdgesState<Edge>([])
   const [callNodes, setCallNodes, onCallNodesChange] = useNodesState<Node<VisualNodeData>>([])
@@ -711,11 +784,22 @@ export default function BotPage() {
     const callGreeting = company.settings?.callBotGreeting || 'Bem-vindo. Escolha uma das opções do menu para continuar o atendimento.'
     const callDigits = parseCallDigits(company.settings?.callBotOptions)
     const callFlow = normalizeCallVisualFlow(company.settings?.visualBotFlows?.call || createDefaultCallVisualFlow(callGreeting, callDigits), callGreeting, callDigits)
-    setChatNodes(applyNodeHandlers(chatFlow.nodes || [], updateNode, removeNode))
+    setChatNodes(applyNodeHandlers(chatFlow.nodes || [], updateNode, removeNode, sectorOptions))
     setChatEdges(chatFlow.edges || [])
-    setCallNodes(applyNodeHandlers(callFlow.nodes || [], updateNode, removeNode))
+    setCallNodes(applyNodeHandlers(callFlow.nodes || [], updateNode, removeNode, sectorOptions))
     setCallEdges(callFlow.edges || [])
-  }, [company, removeNode, setCallEdges, setCallNodes, setChatEdges, setChatNodes, updateNode])
+  }, [company, removeNode, sectorOptions, setCallEdges, setCallNodes, setChatEdges, setChatNodes, updateNode])
+
+  useEffect(() => {
+    if (!company?.id) return
+    const sectorsQuery = query(collection(db, 'sectors'), where('empresa_id', '==', company.id))
+    const unsubscribe = onSnapshot(sectorsQuery, (snapshot) => {
+      setSectorOptions(buildSectorOptions(snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))))
+    }, () => {
+      setSectorOptions([{ id: DEFAULT_SECTOR_ID, nome: DEFAULT_SECTOR_NAME }])
+    })
+    return () => unsubscribe()
+  }, [company?.id])
 
   const onConnect = useCallback((connection: Connection) => {
     setEdges((current) => addEdge({
@@ -743,8 +827,8 @@ export default function BotPage() {
     const position = flowInstance?.screenToFlowPosition
       ? flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
       : { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
-    setNodes((current) => applyNodeHandlers([...current, createVisualNode(kind, position)], updateNode, removeNode))
-  }, [activeSection, flowInstance, nodes, removeNode, setNodes, updateNode])
+    setNodes((current) => applyNodeHandlers([...current, createVisualNode(kind, position)], updateNode, removeNode, sectorOptions))
+  }, [activeSection, flowInstance, nodes, removeNode, sectorOptions, setNodes, updateNode])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()

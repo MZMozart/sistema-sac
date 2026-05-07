@@ -4,8 +4,19 @@ export type AccountType = 'pf' | 'pj'
 export type UserType = 'PF' | 'PJ' // used on UI for registration/login selection
 export type UserRole = 'owner' | 'manager' | 'employee' | 'client'
 export type ChatStatus = 'waiting' | 'bot' | 'active' | 'closed' | 'pending_resolution'
+export type CallStatus = 'bot' | 'waiting' | 'ringing' | 'active' | 'post_service' | 'ended' | 'completed'
 export type ClosedBy = 'client' | 'employee' | 'bot' | 'inactivity_client' | 'inactivity_employee' | 'system'
 export type MessageSender = 'bot' | 'client' | 'employee'
+export type CallLifecycleState = 'IDLE' | 'STARTED' | 'BOT_FLOW' | 'WAITING_INPUT' | 'TRANSFER_QUEUE' | 'IN_SERVICE' | 'POST_SERVICE' | 'FINISHED'
+
+export interface Sector {
+  id: string
+  nome: string
+  empresa_id: string
+  ativo: boolean
+  created_at: Date
+  updated_at?: Date
+}
 
 export interface User {
   uid: string
@@ -160,6 +171,8 @@ export interface Employee {
   role: UserRole
   permissions: Permissions
   isActive: boolean
+  setor_id?: string | null
+  setor_nome?: string | null
   createdAt: Date
   // Métricas
   totalChats: number
@@ -214,6 +227,8 @@ export interface Chat {
   lastMessageAt?: Date
   queuePosition?: number | null
   employeeName?: string | null
+  setor_id?: string | null
+  setor_nome?: string | null
   botAttempts?: number
   botCurrentMessageId?: string | null
   botAwaitingResolvedConfirmation?: boolean
@@ -256,6 +271,9 @@ export interface Call {
   // Flags de comportamento
   clientHungUp: boolean
   employeeHungUp: boolean
+  callState?: CallLifecycleState
+  setor_id?: string | null
+  setor_nome?: string | null
   clientMuted: boolean
   employeeMuted: boolean
   queuePosition?: number | null

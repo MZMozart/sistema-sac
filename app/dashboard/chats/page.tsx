@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ArrowLeft, ArrowRightLeft, Bot, CheckCircle2, ChevronDown, Clock, Info, MessageSquare, Send, UserRound, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
+import { buildSectorOptions, DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 
 type ChatStatus = 'active' | 'waiting' | 'closed' | 'bot' | 'pending_resolution'
 
@@ -34,6 +35,10 @@ type ChatRecord = {
   botResolved?: boolean
   closedBy?: string | null
   queuePosition?: number | null
+  setor_id?: string | null
+  setor_nome?: string | null
+  queueSectorId?: string | null
+  queueSectorName?: string | null
   lastMessage?: string
   lastMessageAt?: any
   createdAt?: any
@@ -46,7 +51,15 @@ type AttendantRecord = {
   email?: string
   role?: string
   isActive?: boolean
+  setor_id?: string | null
+  setor_nome?: string | null
   activeCount?: number
+}
+
+type SectorRecord = {
+  id: string
+  nome: string
+  ativo?: boolean
 }
 
 type MessageRecord = {
@@ -75,6 +88,7 @@ export default function ChatsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | ChatStatus>('all')
   const [search, setSearch] = useState('')
   const [attendants, setAttendants] = useState<AttendantRecord[]>([])
+  const [sectors, setSectors] = useState<SectorRecord[]>([])
   const [chatInfoDialogOpen, setChatInfoDialogOpen] = useState(false)
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const [transferSearch, setTransferSearch] = useState('')
@@ -111,6 +125,15 @@ export default function ChatsPage() {
       rebalanceChatQueue(company.id).catch(() => null)
     }, 30000)
     return () => window.clearInterval(timer)
+  }, [company?.id])
+
+  useEffect(() => {
+    if (!company?.id) return
+    const sectorsQuery = query(collection(db, 'sectors'), where('empresa_id', '==', company.id))
+    const unsubscribe = onSnapshot(sectorsQuery, (snapshot) => {
+      setSectors(snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) } as SectorRecord)))
+    })
+    return () => unsubscribe()
   }, [company?.id])
 
   useEffect(() => {
@@ -163,6 +186,7 @@ export default function ChatsPage() {
   )
 
   const selectedChat = filteredChats.find((chat) => chat.id === selectedChatId) || chats.find((chat) => chat.id === selectedChatId) || null
+  const sectorOptions = useMemo(() => buildSectorOptions(sectors), [sectors])
   useEffect(() => {
     if (!selectedChat || messages.length === 0) return
 
@@ -344,6 +368,10 @@ export default function ChatsPage() {
         employeeId: target.userId,
         employeeName: target.name || target.email || 'Atendente',
         status: 'waiting',
+        setor_id: target.setor_id || selectedChat.setor_id || DEFAULT_SECTOR_ID,
+        setor_nome: target.setor_nome || selectedChat.setor_nome || DEFAULT_SECTOR_NAME,
+        queueSectorId: target.setor_id || selectedChat.queueSectorId || selectedChat.setor_id || DEFAULT_SECTOR_ID,
+        queueSectorName: target.setor_nome || selectedChat.queueSectorName || selectedChat.setor_nome || DEFAULT_SECTOR_NAME,
         lastActivity: serverTimestamp(),
       })
       await rebalanceChatQueue(selectedChat.companyId)
@@ -369,7 +397,10 @@ export default function ChatsPage() {
         clientId: selectedChat.clientId,
         clientName: selectedChat.clientName || null,
         summary: 'Atendimento transferido para outro atendente.',
-        metadata: { suggestedByQueue: suggestedAttendant?.userId === target.userId },
+        metadata: {
+          suggestedByQueue: suggestedAttendant?.userId === target.userId,
+          setor: target.setor_nome || selectedChat.setor_nome || DEFAULT_SECTOR_NAME,
+        },
       })
       toast.success('Atendimento transferido com sucesso.')
       setTransferDialogOpen(false)
@@ -378,6 +409,39 @@ export default function ChatsPage() {
       toast.error('Não foi possível transferir este atendimento agora.')
     } finally {
       setTransferringUserId(null)
+    }
+  }
+
+  const transferChatToSector = async (sector: { id: string; nome: string }) => {
+    if (!selectedChat) return
+    try {
+      await updateDoc(doc(db, 'chats', selectedChat.id), {
+        employeeId: null,
+        employeeName: null,
+        status: 'waiting',
+        setor_id: sector.id || DEFAULT_SECTOR_ID,
+        setor_nome: sector.nome || DEFAULT_SECTOR_NAME,
+        queueSectorId: sector.id || DEFAULT_SECTOR_ID,
+        queueSectorName: sector.nome || DEFAULT_SECTOR_NAME,
+        lastActivity: serverTimestamp(),
+      })
+      await rebalanceChatQueue(selectedChat.companyId)
+      await createAuditLog({
+        companyId: selectedChat.companyId,
+        companyName: selectedChat.companyName,
+        protocol: selectedChat.protocolo,
+        chatId: selectedChat.id,
+        channel: 'chat',
+        eventType: 'chat_sector_transferred',
+        clientId: selectedChat.clientId,
+        clientName: selectedChat.clientName || null,
+        summary: `Atendimento transferido para o setor ${sector.nome}.`,
+        metadata: { sectorId: sector.id, sectorName: sector.nome },
+      })
+      toast.success(`Atendimento enviado para ${sector.nome}.`)
+      setTransferDialogOpen(false)
+    } catch {
+      toast.error('Não foi possível transferir para este setor.')
     }
   }
 
@@ -431,6 +495,7 @@ export default function ChatsPage() {
                     {statusBadge(chat.status)}
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{chat.lastMessage || 'Sem mensagens ainda'}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Setor: {chat.queueSectorName || chat.setor_nome || DEFAULT_SECTOR_NAME}</p>
                 </button>
               ))}
             </div>
@@ -579,7 +644,7 @@ export default function ChatsPage() {
               </div>
               <div className="rounded-2xl border border-border bg-card/60 p-4">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Fila e eventos</p>
-                <p className="mt-2 text-xs text-muted-foreground">Posição: {selectedChat.queuePosition || 'sem fila'} • Encerramento: {selectedChat.closedBy || 'em andamento'}</p>
+                <p className="mt-2 text-xs text-muted-foreground">Setor: {selectedChat.queueSectorName || selectedChat.setor_nome || DEFAULT_SECTOR_NAME} • Posição: {selectedChat.queuePosition || 'sem fila'} • Encerramento: {selectedChat.closedBy || 'em andamento'}</p>
                 <p className="mt-2 text-xs text-muted-foreground">Transferências: {(selectedChat as any).transferCount || 0} • Inatividade: {(selectedChat as any).inactiveCount || 0}</p>
               </div>
               <div className="rounded-2xl border border-border bg-card/60 p-4 sm:col-span-2">
@@ -611,6 +676,16 @@ export default function ChatsPage() {
                 <Badge variant="outline" data-testid="dashboard-chat-transfer-suggestion-badge">
                   {suggestedAttendant ? `${suggestedAttendant.activeCount || 0} ativos` : 'Fila indisponível'}
                 </Badge>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Transferir para setor</p>
+              <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-chat-transfer-sector-list">
+                {sectorOptions.map((sector) => (
+                  <Button key={sector.id} type="button" variant="outline" onClick={() => transferChatToSector(sector)} data-testid={`dashboard-chat-transfer-sector-${sector.id}`}>
+                    {sector.nome}
+                  </Button>
+                ))}
               </div>
             </div>
             <Input
