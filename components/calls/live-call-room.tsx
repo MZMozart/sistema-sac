@@ -94,7 +94,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     if (!audioContextRef.current || !destinationRef.current || recordingKeepAliveRef.current) return
     const source = audioContextRef.current.createConstantSource()
     const gain = audioContextRef.current.createGain()
-    gain.gain.value = 0
+    gain.gain.value = 0.00001
     source.connect(gain)
     gain.connect(destinationRef.current)
     source.start()
@@ -331,7 +331,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }
       if (recorder.state !== 'inactive') {
         recorder.requestData()
-        recorder.stop()
+        window.setTimeout(() => {
+          if (recorder.state !== 'inactive') recorder.stop()
+        }, 500)
       } else {
         uploadRecording().then(resolve).catch(() => resolve(null))
       }
@@ -341,16 +343,16 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const cleanupRoom = async (options?: { stopProvidedStream?: boolean }) => {
     cleanupFnsRef.current.forEach((cleanup) => cleanup())
     cleanupFnsRef.current = []
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      await stopRecorderAndUpload().catch(() => null)
+    }
+    mediaRecorderRef.current = null
     peerConnectionRef.current?.close()
     peerConnectionRef.current = null
     if (localStreamRef.current && (options?.stopProvidedStream || localStreamRef.current !== initialLocalStream)) {
       localStreamRef.current.getTracks().forEach((track) => track.stop())
     }
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      await stopRecorderAndUpload().catch(() => null)
-    }
-    mediaRecorderRef.current = null
     try {
       recordingKeepAliveRef.current?.source.stop()
     } catch {}
@@ -829,8 +831,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }, { merge: true }).catch(() => null),
     ])
 
-    peerConnectionRef.current?.close()
-
     const savedRecordingUrl = await stopRecorderAndUpload().catch(async (error) => {
       await createAuditLog({
         companyId,
@@ -849,7 +849,19 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       return null
     })
     const recordingUrl = savedRecordingUrl || await getExistingRecordingUrl()
-    const recordingStatus = recordingUrl ? 'saved' : 'not_saved'
+    const [currentCallSnapshot, currentRoomSnapshot] = await Promise.all([
+      getDoc(callRef).catch(() => null),
+      getDoc(roomRef).catch(() => null),
+    ])
+    const currentRecordingStatus = currentCallSnapshot?.data()?.recordingStatus || currentRoomSnapshot?.data()?.recordingStatus
+    const currentRecordingError = currentCallSnapshot?.data()?.recordingError || currentRoomSnapshot?.data()?.recordingError || null
+    const recordingStatus = recordingUrl ? 'saved' : currentRecordingStatus === 'failed' ? 'failed' : 'not_saved'
+    const recordingPayload = recordingUrl
+      ? { recordingUrl, recordingStatus }
+      : {
+          recordingStatus,
+          ...(currentRecordingError ? { recordingError: currentRecordingError } : {}),
+        }
 
     const callMessagesSnapshot = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callId))).catch(() => null)
     const callMessages = callMessagesSnapshot?.docs.map((item) => item.data() as any) || []
@@ -857,15 +869,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
     await Promise.all([
       setDoc(roomRef, {
-        recordingStatus,
-        recordingUrl: recordingUrl || null,
+        ...recordingPayload,
         callChatMessageCount: callMessages.length,
         callChatAttachmentCount: callFiles,
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch(() => null),
       setDoc(callRef, {
-        recordingUrl: recordingUrl || null,
-        recordingStatus,
+        ...recordingPayload,
         callChatMessageCount: callMessages.length,
         callChatAttachmentCount: callFiles,
         updatedAt: serverTimestamp(),
@@ -895,6 +905,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       },
     }).catch(() => null)
 
+    peerConnectionRef.current?.close()
     await createNotification({
       recipientCompanyId: companyId,
       recipientUserId: mode === 'agent' ? clientUserId : agentUserId,
