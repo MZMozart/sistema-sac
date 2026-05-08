@@ -324,21 +324,26 @@ export default function ClientCallPage() {
 
     initialSpeechInProgressRef.current = true
     initialSpeechAttemptsRef.current += 1
+    const timelineText = callBotSpeech || callBotGreeting || 'Fluxo inicial da ligação executado pelo BOT.'
     await Promise.all([
       setDoc(doc(db, 'call_sessions', id), {
         callState: 'BOT_FLOW',
-        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: timelineText.slice(0, 500), timestamp: new Date().toISOString() }),
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch(() => null),
       setDoc(doc(db, 'calls', session.callId || id), {
         callState: 'BOT_FLOW',
-        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: timelineText.slice(0, 500), timestamp: new Date().toISOString() }),
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch(() => null),
     ])
 
     try {
-      await speakText(callBotSpeech)
+      if (callGreetingNode?.id) {
+        await executeBotFlowUntilInput(callGreetingNode.id)
+      } else {
+        await speakText(callBotSpeech)
+      }
       spokenRef.current = true
       await Promise.all([
         setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
@@ -422,7 +427,6 @@ export default function ClientCallPage() {
     if (!audioEnabled || !callBotSpeech || !session || session.status === 'ended') return
     if (spokenRef.current) return
 
-    spokenRef.current = true
     const timer = window.setTimeout(() => {
       startInitialBotSpeech().catch(() => {
         fallbackSpeakText(callBotSpeech).catch(() => null)
@@ -576,17 +580,82 @@ export default function ClientCallPage() {
   }
 
   const announceVisualOptions = async (nodeId?: string | null) => {
-    if (!nodeId) return
-    const available = visualCallEdges
-      .filter((edge: any) => edge?.source === nodeId)
-      .map((edge: any) => visualCallNodes.find((node: any) => node?.id === edge.target && node?.data?.kind === 'callDigit'))
-      .filter(Boolean)
+    const available = nodeId
+      ? visualCallEdges
+          .filter((edge: any) => edge?.source === nodeId)
+          .map((edge: any) => visualCallNodes.find((node: any) => node?.id === edge.target && node?.data?.kind === 'callDigit'))
+          .filter(Boolean)
+      : []
+    const fallbackDigits = available.length ? available : visualCallNodes.filter((node: any) => node?.data?.kind === 'callDigit')
 
-    if (!available.length) return
-    const text = available
+    if (!fallbackDigits.length) return
+    const text = fallbackDigits
       .map((node: any) => `Digite ${node.data?.digit || ''} para ${node.data?.actionLabel || node.data?.title || 'continuar'}.`)
       .join(' ')
     await speakText(text)
+  }
+
+  const getOutgoingNodes = (nodeId: string) => visualCallEdges
+    .filter((edge: any) => edge?.source === nodeId)
+    .map((edge: any) => visualCallNodes.find((node: any) => node?.id === edge.target))
+    .filter(Boolean)
+
+  const executeBotFlowUntilInput = async (startNodeId: string) => {
+    let currentNode = visualCallNodes.find((node: any) => node?.id === startNodeId)
+    const visited = new Set<string>()
+
+    for (let step = 0; step < 30 && currentNode; step += 1) {
+      if (visited.has(currentNode.id)) {
+        await announceVisualOptions(currentNode.id)
+        return
+      }
+      visited.add(currentNode.id)
+      setCurrentVisualCallNodeId(currentNode.id)
+
+      if ((currentNode.data?.kind === 'callGreeting' || currentNode.data?.kind === 'callText') && currentNode.data?.text) {
+        await speakText(currentNode.data.text)
+      }
+
+      const outgoingNodes = getOutgoingNodes(currentNode.id)
+      const digitTargets = outgoingNodes.filter((node: any) => node?.data?.kind === 'callDigit')
+      if (digitTargets.length) {
+        await announceVisualOptions(currentNode.id)
+        return
+      }
+
+      const nextTextOrAction = outgoingNodes.find((node: any) => ['callText', 'callAction', 'callGreeting'].includes(node?.data?.kind))
+      if (!nextTextOrAction) {
+        if (visualCallNodes.some((node: any) => node?.data?.kind === 'callDigit')) {
+          await announceVisualOptions(null)
+        }
+        return
+      }
+
+      if (nextTextOrAction.data?.kind === 'callAction') {
+        const action = nextTextOrAction.data?.action || 'transfer'
+        if (nextTextOrAction.data?.actionLabel) await speakText(nextTextOrAction.data.actionLabel)
+        if (action === 'repeat') {
+          await announceVisualOptions(currentNode.id)
+          return
+        }
+        if (action === 'end') {
+          await finishCallByBot()
+          return
+        }
+        if (action === 'transfer') {
+          await enterHumanQueue({
+            digit: '',
+            label: nextTextOrAction.data?.actionLabel || nextTextOrAction.data?.title || 'Atendimento humano',
+            action: 'transfer',
+            sectorId: nextTextOrAction.data?.sectorId || null,
+            sectorName: nextTextOrAction.data?.sectorName || null,
+          })
+          return
+        }
+      }
+
+      currentNode = nextTextOrAction
+    }
   }
 
   const executeVisualTarget = async (targetNode: any, originOption: any) => {
