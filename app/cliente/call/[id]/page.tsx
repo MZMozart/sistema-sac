@@ -39,6 +39,8 @@ export default function ClientCallPage() {
   const spokenRef = useRef(false)
   const initialSpeechInProgressRef = useRef(false)
   const initialSpeechAttemptsRef = useRef(0)
+  const menuRepeatCountRef = useRef(0)
+  const botStoppedRef = useRef(false)
   const autoStartedRef = useRef(false)
   const postServicePromptRef = useRef(false)
   const speakingRef = useRef(false)
@@ -99,6 +101,13 @@ export default function ClientCallPage() {
     const timer = window.setInterval(updateHeartbeat, 15000)
     return () => window.clearInterval(timer)
   }, [id, session?.id, session?.callId, session?.status, user?.uid])
+
+  useEffect(() => {
+    if (['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) {
+      botStoppedRef.current = true
+      speakingRef.current = false
+    }
+  }, [session?.status])
 
   const callVisualFlow = useMemo(() => company?.settings?.visualBotFlows?.call || session?.callVisualFlow || null, [company?.settings?.visualBotFlows?.call, session?.callVisualFlow])
   const visualCallNodes = useMemo(() => Array.isArray(callVisualFlow?.nodes) ? callVisualFlow.nodes : [], [callVisualFlow])
@@ -280,6 +289,10 @@ export default function ClientCallPage() {
       const graph = callAudioGraphRef.current
       if (graph) {
         await graph.context.resume().catch(() => null)
+        if (botStoppedRef.current || ['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) {
+          speakingRef.current = false
+          return
+        }
         graph.botGain.gain.value = botVoiceVolume
         const decodedAudio = await graph.context.decodeAudioData(audioBufferData.slice(0))
         const source = graph.context.createBufferSource()
@@ -312,6 +325,7 @@ export default function ClientCallPage() {
       .catch(() => undefined)
       .then(async () => {
         for (const chunk of chunks) {
+          if (botStoppedRef.current || ['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) break
           await playSpeechNow(chunk)
         }
       })
@@ -320,7 +334,7 @@ export default function ClientCallPage() {
   }
 
   const startInitialBotSpeech = async () => {
-    if (!callBotSpeech || !session || session.status === 'ended' || spokenRef.current || initialSpeechInProgressRef.current) return
+    if (!callBotSpeech || !session || session.status === 'ended' || spokenRef.current || initialSpeechInProgressRef.current || botStoppedRef.current) return
 
     initialSpeechInProgressRef.current = true
     initialSpeechAttemptsRef.current += 1
@@ -398,7 +412,6 @@ export default function ClientCallPage() {
         const botGain = context.createGain()
         botGain.gain.value = botVoiceVolume
         context.createMediaStreamSource(microphoneStream).connect(destination)
-        botGain.connect(destination)
         botGain.connect(context.destination)
         callAudioGraphRef.current = { context, destination, botGain, micStream: microphoneStream }
         localCallStreamRef.current = destination.stream
@@ -477,6 +490,8 @@ export default function ClientCallPage() {
 
   const enterHumanQueue = async (option: any) => {
     if (!session) return
+    botStoppedRef.current = true
+    speakingRef.current = false
     const optionDigit = String(option?.digit || '')
     const optionLabel = option?.label || option?.actionLabel || option?.description || (optionDigit ? `Opção ${optionDigit}` : 'Atendimento humano')
     const queueReason = optionLabel || 'Atendimento humano'
@@ -543,7 +558,9 @@ export default function ClientCallPage() {
       summary: `Cliente entrou na fila de atendimento humano do setor ${sectorName}. Motivo: ${queueReason}.`,
       metadata: { digit: optionDigit || null, label: queueReason, sectorId, sectorName, suggestedEmployeeId: assignment?.employee?.userId || null },
     })
-    speakText('Certo. Vou te colocar na fila para falar com um atendente. Aguarde na linha.').catch(() => null)
+    if (!botStoppedRef.current) {
+      speakText('Certo. Vou te colocar na fila para falar com um atendente. Aguarde na linha.').catch(() => null)
+    }
   }
 
   const finishCallByBot = async () => {
@@ -580,6 +597,7 @@ export default function ClientCallPage() {
   }
 
   const announceVisualOptions = async (nodeId?: string | null) => {
+    if (menuRepeatCountRef.current >= 2) return
     const available = nodeId
       ? visualCallEdges
           .filter((edge: any) => edge?.source === nodeId)
@@ -592,6 +610,7 @@ export default function ClientCallPage() {
     const text = fallbackDigits
       .map((node: any) => `Digite ${node.data?.digit || ''} para ${node.data?.actionLabel || node.data?.title || 'continuar'}.`)
       .join(' ')
+    menuRepeatCountRef.current += 1
     await speakText(text)
   }
 
@@ -606,7 +625,7 @@ export default function ClientCallPage() {
 
     for (let step = 0; step < 30 && currentNode; step += 1) {
       if (visited.has(currentNode.id)) {
-        await announceVisualOptions(currentNode.id)
+        if (menuRepeatCountRef.current < 2) await announceVisualOptions(currentNode.id)
         return
       }
       visited.add(currentNode.id)
@@ -633,7 +652,7 @@ export default function ClientCallPage() {
 
       if (nextTextOrAction.data?.kind === 'callAction') {
         const action = nextTextOrAction.data?.action || 'transfer'
-        if (nextTextOrAction.data?.actionLabel) await speakText(nextTextOrAction.data.actionLabel)
+        if (nextTextOrAction.data?.actionLabel && action !== 'transfer') await speakText(nextTextOrAction.data.actionLabel)
         if (action === 'repeat') {
           await announceVisualOptions(currentNode.id)
           return
@@ -643,6 +662,7 @@ export default function ClientCallPage() {
           return
         }
         if (action === 'transfer') {
+          if (nextTextOrAction.data?.actionLabel) await speakText(nextTextOrAction.data.actionLabel)
           await enterHumanQueue({
             digit: '',
             label: nextTextOrAction.data?.actionLabel || nextTextOrAction.data?.title || 'Atendimento humano',

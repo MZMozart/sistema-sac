@@ -93,7 +93,6 @@ async function prepareCallAudioGraph() {
   const botGain = context.createGain()
   botGain.gain.value = 1
   context.createMediaStreamSource(microphoneStream).connect(destination)
-  botGain.connect(destination)
   botGain.connect(context.destination)
   ;(window as any).__atendeproPendingCallAudio = {
     context,
