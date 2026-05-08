@@ -245,6 +245,61 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     return getDownloadURL(fileRef)
   }
 
+  const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Falha ao converter gravação.'))
+    reader.readAsDataURL(blob)
+  })
+
+  const saveRecordingInline = async (blob: Blob) => {
+    const maxInlineSize = 850 * 1024
+    if (blob.size > maxInlineSize) {
+      throw new Error('Arquivo maior que o limite do fallback local. Ative o Firebase Storage para gravar chamadas longas.')
+    }
+
+    const recordingUrl = await blobToDataUrl(blob)
+    await Promise.all([
+      setDoc(doc(db, 'calls', callId), {
+        recordingRequired: true,
+        recordingStatus: 'saved',
+        recordingUrl,
+        recordingStorage: 'firestore-inline',
+        recordingSize: blob.size,
+        recordingChunkCount: recordedChunksRef.current.length,
+        recordingSavedBy: mode,
+        recordingSavedAt: serverTimestamp(),
+        recordingWarning: 'Gravação salva embutida no Firestore porque o bucket do Firebase Storage não está disponível.',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+      setDoc(doc(db, 'call_sessions', roomId), {
+        recordingRequired: true,
+        recordingStatus: 'saved',
+        recordingUrl,
+        recordingStorage: 'firestore-inline',
+        recordingSize: blob.size,
+        recordingChunkCount: recordedChunksRef.current.length,
+        recordingSavedBy: mode,
+        recordingSavedAt: serverTimestamp(),
+        recordingWarning: 'Gravação salva embutida no Firestore porque o bucket do Firebase Storage não está disponível.',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+      createAuditLog({
+        companyId,
+        companyName,
+        clientId: clientUserId || null,
+        employeeId: agentUserId || currentUserId,
+        protocol: auditProtocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_saved',
+        summary: 'Gravação da ligação salva no protocolo por fallback local.',
+        metadata: { recordedBy: mode, size: blob.size, chunkCount: recordedChunksRef.current.length, storage: 'firestore-inline' },
+      }),
+    ])
+    return recordingUrl
+  }
+
   const uploadRecording = async () => {
     if (!recordedChunksRef.current.length) {
       await registerRecordingFailure('A gravação terminou sem pedaços de áudio disponíveis.', {
@@ -273,11 +328,15 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         recordingUrl = await uploadRecordingWithClientStorage(blob)
       } catch (error: any) {
         const clientError = String(error?.message || error || 'erro desconhecido')
-        await registerRecordingFailure(`Servidor: ${serverError || 'não retornou URL'}. Storage do navegador: ${clientError}`, {
-          recordingChunkCount: recordedChunksRef.current.length,
-          recordingSize: blob.size,
-          recordingMimeType: blob.type,
-        })
+        try {
+          recordingUrl = await saveRecordingInline(blob)
+        } catch (inlineError: any) {
+          await registerRecordingFailure(`Servidor: ${serverError || 'não retornou URL'}. Storage do navegador: ${clientError}. Fallback Firestore: ${String(inlineError?.message || inlineError || 'erro desconhecido')}`, {
+            recordingChunkCount: recordedChunksRef.current.length,
+            recordingSize: blob.size,
+            recordingMimeType: blob.type,
+          })
+        }
       }
     }
 
