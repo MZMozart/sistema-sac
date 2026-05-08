@@ -566,7 +566,6 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       destinationRef.current = audioContext.createMediaStreamDestination()
       keepRecordingStreamAlive()
       attachStreamForRecording(recordingLocalStream || localStream)
-      startRecording()
 
       const peerConnection = new RTCPeerConnection(rtcConfig)
       peerConnectionRef.current = peerConnection
@@ -595,6 +594,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         if (state === 'connected') {
           startedAtRef.current = Date.now()
           setStatus('active')
+          startRecording()
           await updateDoc(roomRef, { status: 'active', activeAt: serverTimestamp() })
           await setDoc(callRef, { status: 'active', updatedAt: serverTimestamp() }, { merge: true })
           await createAuditLog({
@@ -776,7 +776,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     return () => {
       cleanupRoom().catch(() => null)
     }
-  }, [audioSettings?.inputDeviceId, callId, clientUserId, companyId, companyName, currentUserId, currentUserName, initialLocalStream, mode, recordingLocalStream, retryToken, roomId])
+  }, [audioSettings?.inputDeviceId, callId, clientUserId, companyId, companyName, currentUserId, currentUserName, initialLocalStream, mode, retryToken, roomId])
 
   useEffect(() => {
     if (!remoteAudioRef.current) return
