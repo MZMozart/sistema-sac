@@ -10,7 +10,11 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file')
     const companyId = String(formData.get('companyId') || '')
     const callId = String(formData.get('callId') || '')
+    const roomId = String(formData.get('roomId') || callId)
     const protocol = String(formData.get('protocol') || callId)
+    const recordedBy = String(formData.get('recordedBy') || 'unknown')
+    const chunkCount = Number(formData.get('chunkCount') || 0)
+    const duration = Number(formData.get('duration') || 0)
 
     if (!(file instanceof File) || !companyId || !callId) {
       return NextResponse.json({ error: 'missing-recording-data' }, { status: 400 })
@@ -59,6 +63,23 @@ export async function POST(request: NextRequest) {
         recordingRequired: true,
         recordingStatus: 'saved',
         recordingUrl,
+        recordingSavedBy: recordedBy,
+        recordingSavedAt: FieldValue.serverTimestamp(),
+        recordingSize: buffer.length,
+        recordingChunkCount: chunkCount,
+        recordingDuration: duration,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
+
+      await adminDb.collection('call_sessions').doc(roomId).set({
+        recordingRequired: true,
+        recordingStatus: 'saved',
+        recordingUrl,
+        recordingSavedBy: recordedBy,
+        recordingSavedAt: FieldValue.serverTimestamp(),
+        recordingSize: buffer.length,
+        recordingChunkCount: chunkCount,
+        recordingDuration: duration,
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true })
 
@@ -69,7 +90,7 @@ export async function POST(request: NextRequest) {
         channel: 'call',
         eventType: 'call_recording_saved',
         summary: 'Gravação da ligação salva com sucesso.',
-        metadata: { recordingUrl },
+        metadata: { recordingUrl, recordedBy, size: buffer.length, chunkCount, duration },
         createdAt: FieldValue.serverTimestamp(),
       })
     } catch (metadataError: any) {

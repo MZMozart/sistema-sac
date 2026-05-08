@@ -177,42 +177,98 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     return String(callSnapshot?.data()?.recordingUrl || roomSnapshot?.data()?.recordingUrl || '')
   }
 
+  const registerRecordingFailure = async (detail: string, extra: Record<string, any> = {}) => {
+    const payload = {
+      recordingRequired: true,
+      recordingStatus: 'failed',
+      recordingError: detail.slice(0, 900),
+      recordingFailedBy: mode,
+      recordingFailedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...extra,
+    }
+    await Promise.all([
+      setDoc(doc(db, 'calls', callId), payload, { merge: true }),
+      setDoc(doc(db, 'call_sessions', roomId), payload, { merge: true }),
+      createAuditLog({
+        companyId,
+        companyName,
+        clientId: clientUserId || null,
+        employeeId: agentUserId || currentUserId,
+        protocol: auditProtocol,
+        callId,
+        channel: 'call',
+        eventType: 'call_recording_failed',
+        summary: 'A gravação foi capturada, mas não pôde ser salva no protocolo.',
+        metadata: { detail: detail.slice(0, 900), recordedBy: mode, ...extra },
+      }),
+    ]).catch(() => null)
+  }
+
+  const uploadRecordingWithServer = async (blob: Blob) => {
+    const formData = new FormData()
+    formData.append('file', blob, `recording-${callId}.webm`)
+    formData.append('companyId', companyId)
+    formData.append('callId', callId)
+    formData.append('roomId', roomId)
+    formData.append('protocol', auditProtocol)
+    formData.append('recordedBy', mode)
+    formData.append('chunkCount', String(recordedChunksRef.current.length))
+    formData.append('duration', String(duration))
+    const response = await fetch('/api/calls/recording', { method: 'POST', body: formData })
+    const text = await response.text()
+    let payload: any = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {}
+    if (!response.ok) {
+      throw new Error(payload?.error || text || `Falha HTTP ${response.status}`)
+    }
+    return payload?.recordingUrl || null
+  }
+
+  const uploadRecordingWithClientStorage = async (blob: Blob) => {
+    const fileRef = ref(storage, `calls/${companyId}/${callId}/recording-${Date.now()}.webm`)
+    await uploadBytes(fileRef, blob)
+    return getDownloadURL(fileRef)
+  }
+
   const uploadRecording = async () => {
     if (!recordedChunksRef.current.length) {
+      await registerRecordingFailure('A gravação terminou sem pedaços de áudio disponíveis.', {
+        recordingChunkCount: 0,
+      })
       return getExistingRecordingUrl()
     }
-      const blob = new Blob(recordedChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' })
+    const blob = new Blob(recordedChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' })
+    if (blob.size <= 0) {
+      await registerRecordingFailure('A gravação foi finalizada com arquivo vazio.', {
+        recordingChunkCount: recordedChunksRef.current.length,
+        recordingSize: blob.size,
+      })
+      return getExistingRecordingUrl()
+    }
     let recordingUrl: string | null = null
+    let serverError = ''
     try {
-      const fileRef = ref(storage, `calls/${companyId}/${callId}/recording-${Date.now()}.webm`)
-      await uploadBytes(fileRef, blob)
-      recordingUrl = await getDownloadURL(fileRef)
-    } catch {
-      const formData = new FormData()
-      formData.append('file', blob, `recording-${callId}.webm`)
-      formData.append('companyId', companyId)
-      formData.append('callId', callId)
-      formData.append('protocol', auditProtocol)
-      const response = await fetch('/api/calls/recording', { method: 'POST', body: formData })
-      if (response.ok) {
-        const payload = await response.json()
-        recordingUrl = payload.recordingUrl || null
-      } else {
-        const detail = await response.text().catch(() => '')
-        await createAuditLog({
-          companyId,
-          companyName,
-          clientId: clientUserId || null,
-          employeeId: agentUserId || currentUserId,
-          protocol: auditProtocol,
-          callId,
-          channel: 'call',
-          eventType: 'call_recording_failed',
-          summary: 'A gravação foi capturada, mas não pôde ser enviada para o servidor.',
-          metadata: { detail: detail.slice(0, 500) },
-        }).catch(() => null)
+      recordingUrl = await uploadRecordingWithServer(blob)
+    } catch (error: any) {
+      serverError = String(error?.message || error || 'erro desconhecido')
+    }
+
+    if (!recordingUrl) {
+      try {
+        recordingUrl = await uploadRecordingWithClientStorage(blob)
+      } catch (error: any) {
+        const clientError = String(error?.message || error || 'erro desconhecido')
+        await registerRecordingFailure(`Servidor: ${serverError || 'não retornou URL'}. Storage do navegador: ${clientError}`, {
+          recordingChunkCount: recordedChunksRef.current.length,
+          recordingSize: blob.size,
+          recordingMimeType: blob.type,
+        })
       }
     }
+
     if (!recordingUrl) {
       return getExistingRecordingUrl()
     }
