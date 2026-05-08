@@ -227,6 +227,32 @@ export default function ClientCallPage() {
     })
   }
 
+  const splitBotSpeech = (text: string) => {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) return []
+    const chunks: string[] = []
+    let current = ''
+
+    normalized.split(/(?<=[.!?])\s+/).forEach((sentence) => {
+      if ((current + ' ' + sentence).trim().length <= 220) {
+        current = (current + ' ' + sentence).trim()
+        return
+      }
+      if (current) chunks.push(current)
+      if (sentence.length <= 220) {
+        current = sentence
+        return
+      }
+      for (let index = 0; index < sentence.length; index += 220) {
+        chunks.push(sentence.slice(index, index + 220))
+      }
+      current = ''
+    })
+
+    if (current) chunks.push(current)
+    return chunks
+  }
+
   const playSpeechNow = async (text: string) => {
     const cleanText = text.trim()
     if (!cleanText || speakingRef.current) return
@@ -250,36 +276,25 @@ export default function ClientCallPage() {
         return
       }
 
-      const blob = await response.blob()
-      const audioUrl = URL.createObjectURL(blob)
+      const audioBufferData = await response.arrayBuffer()
       const graph = callAudioGraphRef.current
       if (graph) {
         await graph.context.resume().catch(() => null)
         graph.botGain.gain.value = botVoiceVolume
-        const audio = new Audio(audioUrl)
-        audio.crossOrigin = 'anonymous'
-        audio.preload = 'auto'
-        audio.volume = 1
-        const source = graph.context.createMediaElementSource(audio)
+        const decodedAudio = await graph.context.decodeAudioData(audioBufferData.slice(0))
+        const source = graph.context.createBufferSource()
+        source.buffer = decodedAudio
         source.connect(graph.botGain)
         await new Promise<void>((resolve) => {
           const finish = () => {
             source.disconnect()
-            URL.revokeObjectURL(audioUrl)
             speakingRef.current = false
             resolve()
           }
-          audio.onended = finish
-          audio.onerror = finish
-          audio.play().catch(async () => {
-            URL.revokeObjectURL(audioUrl)
-            await fallbackSpeakText(cleanText)
-            speakingRef.current = false
-            resolve()
-          })
+          source.onended = finish
+          source.start()
         })
       } else {
-        URL.revokeObjectURL(audioUrl)
         await fallbackSpeakText(cleanText)
         speakingRef.current = false
       }
@@ -292,9 +307,14 @@ export default function ClientCallPage() {
   const speakText = async (text: string) => {
     const cleanText = text.trim()
     if (!cleanText) return
+    const chunks = splitBotSpeech(cleanText)
     const nextSpeech = speechQueueRef.current
       .catch(() => undefined)
-      .then(() => playSpeechNow(cleanText))
+      .then(async () => {
+        for (const chunk of chunks) {
+          await playSpeechNow(chunk)
+        }
+      })
     speechQueueRef.current = nextSpeech
     await nextSpeech
   }
