@@ -105,6 +105,20 @@ export default function ClientCallPage() {
   const visualCallEdges = useMemo(() => Array.isArray(callVisualFlow?.edges) ? callVisualFlow.edges : [], [callVisualFlow])
   const callGreetingNode = useMemo(() => visualCallNodes.find((node: any) => node?.data?.kind === 'callGreeting') || null, [visualCallNodes])
   const currentVisualCallNode = useMemo(() => visualCallNodes.find((node: any) => node?.id === currentVisualCallNodeId) || callGreetingNode || null, [callGreetingNode, currentVisualCallNodeId, visualCallNodes])
+  const allVisualCallOptions = useMemo(() => {
+    return visualCallNodes
+      .filter((node: any) => node?.data?.kind === 'callDigit')
+      .map((node: any) => ({
+        digit: String(node.data?.digit || '1'),
+        label: node.data?.actionLabel || node.data?.title || `Opção ${node.data?.digit || '1'}`,
+        speech: node.data?.text || `Você selecionou a opção ${node.data?.digit || '1'}.`,
+        action: node.data?.action || 'info',
+        actionLabel: node.data?.actionLabel || node.data?.title || null,
+        sectorId: node.data?.sectorId || null,
+        sectorName: node.data?.sectorName || null,
+        visualNodeId: node.id,
+      }))
+  }, [visualCallNodes])
   const visualCallOptions = useMemo(() => {
     if (!currentVisualCallNode) return []
     return visualCallEdges
@@ -124,15 +138,43 @@ export default function ClientCallPage() {
   }, [currentVisualCallNode, visualCallEdges, visualCallNodes])
   const legacyCallBotOptions = useMemo(() => company?.settings?.callBotOptions || company?.uraOptions || session?.callBotOptions || [], [company, session?.callBotOptions])
   const callBotOptions = useMemo(() => visualCallOptions.length ? visualCallOptions : legacyCallBotOptions, [legacyCallBotOptions, visualCallOptions])
+  const initialCallBotOptions = useMemo(() => allVisualCallOptions.length ? allVisualCallOptions : callBotOptions, [allVisualCallOptions, callBotOptions])
   const callBotGreeting = useMemo(() => callGreetingNode?.data?.text || company?.settings?.callBotGreeting || company?.botGreeting || session?.callBotGreeting || '', [callGreetingNode, company, session?.callBotGreeting])
+  const initialCallBotIntro = useMemo(() => {
+    if (!callGreetingNode?.id) return callBotGreeting
+    const visited = new Set<string>()
+    const queue = [callGreetingNode.id]
+    const texts: string[] = []
+
+    while (queue.length) {
+      const nodeId = queue.shift()
+      if (!nodeId || visited.has(nodeId)) continue
+      visited.add(nodeId)
+      const node = visualCallNodes.find((item: any) => item?.id === nodeId)
+      if (!node) continue
+
+      if ((node.data?.kind === 'callGreeting' || node.data?.kind === 'callText') && node.data?.text) {
+        texts.push(String(node.data.text))
+      }
+
+      visualCallEdges
+        .filter((edge: any) => edge?.source === nodeId)
+        .forEach((edge: any) => {
+          const target = visualCallNodes.find((item: any) => item?.id === edge.target)
+          if (target?.data?.kind !== 'callDigit') queue.push(edge.target)
+        })
+    }
+
+    return texts.length ? texts.join(' ') : callBotGreeting
+  }, [callBotGreeting, callGreetingNode?.id, visualCallEdges, visualCallNodes])
   const callBotSpeech = useMemo(() => {
-    const intro = callBotGreeting || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
-    const optionsText = callBotOptions
+    const intro = initialCallBotIntro || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`
+    const optionsText = initialCallBotOptions
       .filter((option: any) => option?.digit || option?.label)
       .map((option: any) => `Digite ${option?.digit || ''} para ${option?.label || option?.actionLabel || option?.description || 'continuar'}.`)
       .join(' ')
     return [intro, optionsText].filter(Boolean).join(' ')
-  }, [callBotGreeting, callBotOptions, session?.companyName])
+  }, [initialCallBotIntro, initialCallBotOptions, session?.companyName])
 
   useEffect(() => {
     if (!callGreetingNode?.id) return
