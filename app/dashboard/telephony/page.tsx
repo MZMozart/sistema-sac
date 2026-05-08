@@ -76,7 +76,7 @@ function toDate(value: any) {
 }
 
 export default function TelephonyPage() {
-  const { company, user, userData } = useAuth()
+  const { company, employee, user, userData } = useAuth()
   const [sessions, setSessions] = useState<CallSession[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [audioEnabled, setAudioEnabled] = useState(false)
@@ -142,9 +142,21 @@ export default function TelephonyPage() {
     }
   }, [localStream])
 
+  const currentUserIsOwner = employee?.role === 'owner' || userData?.role === 'owner' || company?.ownerId === user?.uid
+  const currentUserSectorId = employee?.setor_id || DEFAULT_SECTOR_ID
+  const currentUserSectorName = employee?.setor_nome || DEFAULT_SECTOR_NAME
+  const canHandleSession = (session: CallSession) => {
+    if (currentUserIsOwner) return true
+    const sessionSectorId = session.queueSectorId || session.setor_id || DEFAULT_SECTOR_ID
+    return sessionSectorId === currentUserSectorId
+  }
+
   const waitingSessions = useMemo(
-    () => sessions.filter((session) => session.status === 'waiting').sort((a, b) => Number(a.queuePosition || 9999) - Number(b.queuePosition || 9999)),
-    [sessions]
+    () => sessions
+      .filter((session) => session.status === 'waiting')
+      .filter(canHandleSession)
+      .sort((a, b) => Number(a.queuePosition || 9999) - Number(b.queuePosition || 9999)),
+    [sessions, currentUserIsOwner, currentUserSectorId]
   )
 
   const filteredSessions = useMemo(() => {
@@ -169,22 +181,33 @@ export default function TelephonyPage() {
     if (audioRequestInFlightRef.current) return null
     audioRequestInFlightRef.current = true
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...(company?.settings?.audioSettings?.inputDeviceId && company.settings.audioSettings.inputDeviceId !== 'default'
-            ? { deviceId: { exact: company.settings.audioSettings.inputDeviceId } }
-            : {}),
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
+      const baseAudio = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      }
+      const configuredInput = company?.settings?.audioSettings?.inputDeviceId
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(configuredInput && configuredInput !== 'default' ? { deviceId: { exact: configuredInput } } : {}),
+            ...baseAudio,
+          },
+        })
+      } catch (error) {
+        if (configuredInput && configuredInput !== 'default') {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio })
+        } else {
+          throw error
+        }
+      }
       setLocalStream(stream)
       setAudioEnabled(true)
       return stream
     } catch {
       if (!silent) {
-        alert('Permita o uso do microfone para entrar na ligação pelo navegador.')
+        alert('Não foi possível acessar o microfone. Verifique a permissão do navegador e tente novamente.')
       }
       return null
     } finally {
@@ -194,6 +217,10 @@ export default function TelephonyPage() {
 
   const assumeCall = async (session: CallSession) => {
     if (!user) return
+    if (!canHandleSession(session)) {
+      alert(`Esta ligação pertence ao setor ${session.queueSectorName || session.setor_nome || DEFAULT_SECTOR_NAME}. Seu setor atual é ${currentUserSectorName}.`)
+      return
+    }
     await updateDoc(doc(db, 'call_sessions', session.id), {
       employeeId: user.uid,
       employeeName: userData?.fullName || user.displayName || 'Atendente',

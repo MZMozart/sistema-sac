@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
-import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar } from 'recharts'
+import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts'
 import { useAuth } from '@/contexts/auth-context'
 import { db } from '@/lib/firebase'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
-import { Loader2, MessageSquare, Phone, ShieldCheck, Star, Users } from 'lucide-react'
+import { Loader2, MessageSquare, Phone, ShieldCheck, Star, Trophy, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
@@ -24,7 +24,7 @@ function toDateValue(value: any) {
 }
 
 export default function DashboardPage() {
-  const { company, loading: authLoading } = useAuth()
+  const { company, employee, user, userData, loading: authLoading } = useAuth()
   const [period, setPeriod] = useState<Period>('all')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<any>(null)
@@ -99,13 +99,31 @@ export default function DashboardPage() {
       },
       chartData: Array.from(chartMap.values()).sort((a, b) => a.sortValue - b.sortValue),
       employeeRanking: employees
-        .map((employee) => ({
-          id: employee.id,
-          name: employee.name || employee.email || 'Funcionário',
-          totalChats: employee.totalChats || 0,
-          totalCalls: employee.totalCalls || 0,
-        }))
-        .sort((a, b) => b.totalChats + b.totalCalls - (a.totalChats + a.totalCalls)),
+        .map((employee) => {
+          const employeeRatings = ratingsInPeriod
+            .filter((rating) => rating.employeeId === employee.userId || rating.employeeId === employee.id)
+            .map((rating) => Number(rating.rating || rating.nota || 0))
+            .filter(Boolean)
+          const averageRating = employeeRatings.length
+            ? employeeRatings.reduce((sum, value) => sum + value, 0) / employeeRatings.length
+            : 0
+          const totalChats = employee.totalChats || chatsInPeriod.filter((chat) => chat.employeeId === employee.userId).length
+          const totalCalls = employee.totalCalls || callsInPeriod.filter((call) => call.employeeId === employee.userId).length
+          return {
+            id: employee.id,
+            userId: employee.userId,
+            name: employee.name || employee.email || 'Funcionário',
+            role: employee.role || 'employee',
+            setor: employee.setor_nome || 'Geral',
+            totalChats,
+            totalCalls,
+            totalRatings: employeeRatings.length,
+            averageRating,
+            score: totalChats + totalCalls + averageRating * 3,
+          }
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10),
     }
   }
 
@@ -161,6 +179,10 @@ export default function DashboardPage() {
     ],
     [data]
   )
+  const canSeeVerifiedPlan = useMemo(() => {
+    const role = userData?.role || employee?.role
+    return role === 'owner' || company?.ownerId === user?.uid
+  }, [company?.ownerId, employee?.role, user?.uid, userData?.role])
 
   return (
     <div className="space-y-6">
@@ -203,7 +225,7 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {company?.premiumVerificationActive ? null : (
+          {company?.premiumVerificationActive || !canSeeVerifiedPlan ? null : (
             <Card className="glass border-primary/20 bg-primary/5">
               <CardContent className="flex flex-col gap-4 p-6 lg:flex-row lg:items-center lg:justify-between">
                 <div>
@@ -266,19 +288,34 @@ export default function DashboardPage() {
               <CardTitle>Ranking da equipe</CardTitle>
               <CardDescription>Baseado na produção acumulada no Firestore.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="h-[320px]" data-testid="dashboard-ranking-chart">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data?.employeeRanking || []}>
-                    <CartesianGrid strokeDasharray="4 4" stroke="var(--border)" />
-                    <XAxis dataKey="name" stroke="var(--muted-foreground)" />
-                    <YAxis stroke="var(--muted-foreground)" />
-                    <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '1rem' }} />
-                    <Bar dataKey="totalChats" fill="var(--chart-1)" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="totalCalls" fill="var(--chart-2)" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+            <CardContent className="space-y-3" data-testid="dashboard-ranking-cards">
+              {(data?.employeeRanking || []).length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                  Ainda não há produção suficiente para montar o ranking.
+                </div>
+              ) : (data?.employeeRanking || []).map((employee: any, index: number) => (
+                <div key={employee.id || employee.userId || employee.name} className="flex items-center gap-4 rounded-2xl border border-border bg-card/70 p-4" data-testid={`dashboard-ranking-card-${index + 1}`}>
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl font-bold ${index < 3 ? 'bg-gradient-primary text-white' : 'bg-secondary text-foreground'}`}>
+                    {index < 3 ? <Trophy className="h-5 w-5" /> : index + 1}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate font-semibold">{employee.name}</p>
+                      <Badge variant="outline">{employee.setor}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {employee.totalChats} chats • {employee.totalCalls} ligações • {employee.totalRatings} avaliações
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center justify-end gap-1 font-bold">
+                      <Star className="h-4 w-4 fill-primary text-primary" />
+                      {Number(employee.averageRating || 0).toFixed(1)}
+                    </div>
+                    <p className="text-xs text-muted-foreground">nota média</p>
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </>

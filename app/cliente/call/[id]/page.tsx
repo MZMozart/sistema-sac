@@ -141,42 +141,30 @@ export default function ClientCallPage() {
     return Math.max(0, Math.min(1, configuredVolume / 100))
   }, [company?.settings?.audioSettings?.botVoiceVolume])
 
-  const enableAudio = async () => {
-    let microphoneStream: MediaStream
+  const requestMicrophoneStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('microfone-indisponivel')
+    }
+
+    const baseAudio = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    }
+    const configuredInput = company?.settings?.audioSettings?.inputDeviceId
+
     try {
-      // WebRTC precisa de uma acao do usuario para liberar microfone e audio no navegador.
-      microphoneStream = await navigator.mediaDevices.getUserMedia({
+      return await navigator.mediaDevices.getUserMedia({
         audio: {
-          ...(company?.settings?.audioSettings?.inputDeviceId && company.settings.audioSettings.inputDeviceId !== 'default'
-            ? { deviceId: { exact: company.settings.audioSettings.inputDeviceId } }
-            : {}),
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          ...(configuredInput && configuredInput !== 'default' ? { deviceId: { exact: configuredInput } } : {}),
+          ...baseAudio,
         },
       })
-      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
-      if (!AudioContextCtor) {
-        localCallStreamRef.current = microphoneStream
-        setLocalStream(microphoneStream)
-      } else {
-        const context = new AudioContextCtor()
-        await context.resume().catch(() => null)
-        const destination = context.createMediaStreamDestination()
-        const botGain = context.createGain()
-        botGain.gain.value = botVoiceVolume
-        context.createMediaStreamSource(microphoneStream).connect(destination)
-        botGain.connect(destination)
-        botGain.connect(context.destination)
-        callAudioGraphRef.current = { context, destination, botGain, micStream: microphoneStream }
-        localCallStreamRef.current = destination.stream
-        setLocalStream(destination.stream)
+    } catch (error) {
+      if (configuredInput && configuredInput !== 'default') {
+        return navigator.mediaDevices.getUserMedia({ audio: baseAudio })
       }
-      setAudioEnabled(true)
-      setMobileCallPanel('call')
-    } catch {
-      toast.error('Permita o uso do microfone para iniciar a chamada no navegador.')
-      return
+      throw error
     }
   }
 
@@ -267,6 +255,64 @@ export default function ClientCallPage() {
     await nextSpeech
   }
 
+  const startInitialBotSpeech = async () => {
+    if (!callBotSpeech || !session || session.status === 'ended' || spokenRef.current) return
+
+    spokenRef.current = true
+    await Promise.all([
+      setDoc(doc(db, 'call_sessions', id), {
+        callState: 'BOT_FLOW',
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null),
+      setDoc(doc(db, 'calls', session.callId || id), {
+        callState: 'BOT_FLOW',
+        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => null),
+    ])
+
+    await speakText(callBotSpeech)
+    await Promise.all([
+      setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
+      setDoc(doc(db, 'calls', session.callId || id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
+    ])
+  }
+
+  const enableAudio = async () => {
+    let microphoneStream: MediaStream
+    try {
+      microphoneStream = await requestMicrophoneStream()
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+      if (!AudioContextCtor) {
+        localCallStreamRef.current = microphoneStream
+        setLocalStream(microphoneStream)
+      } else {
+        const context = new AudioContextCtor()
+        await context.resume().catch(() => null)
+        const destination = context.createMediaStreamDestination()
+        const botGain = context.createGain()
+        botGain.gain.value = botVoiceVolume
+        context.createMediaStreamSource(microphoneStream).connect(destination)
+        botGain.connect(destination)
+        botGain.connect(context.destination)
+        callAudioGraphRef.current = { context, destination, botGain, micStream: microphoneStream }
+        localCallStreamRef.current = destination.stream
+        setLocalStream(destination.stream)
+      }
+      setAudioEnabled(true)
+      setMobileCallPanel('call')
+      window.setTimeout(() => {
+        startInitialBotSpeech().catch(() => {
+          fallbackSpeakText(callBotSpeech || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`).catch(() => null)
+        })
+      }, 350)
+    } catch {
+      toast.error('Não foi possível acessar o microfone. Verifique a permissão do navegador e tente novamente.')
+      return
+    }
+  }
+
   useEffect(() => {
     if (!session || !user || audioEnabled || autoStartedRef.current) return
     autoStartedRef.current = true
@@ -279,24 +325,9 @@ export default function ClientCallPage() {
 
     spokenRef.current = true
     const timer = window.setTimeout(() => {
-      setDoc(doc(db, 'call_sessions', id), {
-        callState: 'BOT_FLOW',
-        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
-        updatedAt: serverTimestamp(),
-      }, { merge: true }).catch(() => null)
-      setDoc(doc(db, 'calls', session.callId || id), {
-        callState: 'BOT_FLOW',
-        timeline: arrayUnion({ evento: 'bot_speech', conteudo: callBotSpeech.slice(0, 500), timestamp: new Date().toISOString() }),
-        updatedAt: serverTimestamp(),
-      }, { merge: true }).catch(() => null)
-      speakText(callBotSpeech)
-        .then(() => Promise.all([
-          setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }),
-          setDoc(doc(db, 'calls', session.callId || id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }),
-        ]).then(() => undefined))
-        .catch(() => {
-          fallbackSpeakText(callBotSpeech)
-        })
+      startInitialBotSpeech().catch(() => {
+        fallbackSpeakText(callBotSpeech).catch(() => null)
+      })
     }, 900)
 
     return () => window.clearTimeout(timer)
