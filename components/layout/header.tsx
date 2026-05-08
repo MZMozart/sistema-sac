@@ -22,10 +22,17 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
   const { userData, company, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const [isDesktopShell, setIsDesktopShell] = useState(false)
+  const [canShowInstallButton, setCanShowInstallButton] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    setIsDesktopShell(typeof window !== 'undefined' && Boolean((window as any).desktopShell?.isDesktop))
+    if (typeof window === 'undefined') return
+    const runtime = window as any
+    const desktopShell = Boolean(runtime.desktopShell?.isDesktop)
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true
+    const nativeApp = Boolean(runtime.Capacitor?.isNativePlatform?.())
+    setIsDesktopShell(desktopShell)
+    setCanShowInstallButton(!(desktopShell || standalone || nativeApp))
   }, [])
 
   useEffect(() => {
@@ -84,9 +91,11 @@ export function Header({ scope, profileHref, settingsHref }: HeaderProps) {
         </div>
 
         <div className="flex items-center gap-2 lg:gap-3" ref={containerRef}>
-          <Button type="button" variant="ghost" size="icon" onClick={requestInstallApp} aria-label="Instalar aplicativo" title="Instalar aplicativo" data-testid={`${scope}-header-install-button`}>
-            <Download className="h-4 w-4" />
-          </Button>
+          {canShowInstallButton ? (
+            <Button type="button" variant="ghost" size="icon" onClick={requestInstallApp} aria-label="Instalar aplicativo" title="Instalar aplicativo" data-testid={`${scope}-header-install-button`}>
+              <Download className="h-4 w-4" />
+            </Button>
+          ) : null}
           {isDesktopShell ? (
             <Button type="button" variant="ghost" size="icon" onClick={refreshApp} aria-label="Atualizar sistema" title="Atualizar sistema" data-testid={`${scope}-header-refresh-button`}>
               <RefreshCw className="h-4 w-4" />

@@ -49,6 +49,12 @@ function normalizeExternalUrl(url?: string | null) {
   return `https://${url}`
 }
 
+function getDateTime(value: any) {
+  if (!value) return 0
+  if (typeof value?.toDate === 'function') return value.toDate().getTime()
+  return new Date(value).getTime()
+}
+
 function buildCallBotSpeech(company: Company) {
   const greeting = company.settings?.callBotGreeting || company.botGreeting || `Olá, você ligou para ${company.nomeFantasia || company.razaoSocial}.`
   const options = company.settings?.callBotOptions || company.uraOptions || []
@@ -109,6 +115,7 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
   
   const [company, setCompany] = useState<Company | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
+  const [reviewStats, setReviewStats] = useState({ average: 0, total: 0 })
   const [sectorRanking, setSectorRanking] = useState<any[]>([])
   const [performance, setPerformance] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -140,15 +147,25 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
       try {
         const reviewsQuery = query(
           collection(db, 'ratings'),
-          where('companyId', '==', id),
-          limit(20)
+          where('companyId', '==', id)
         )
         const snapshot = await getDocs(reviewsQuery)
         const reviewsData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        })).sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()).slice(0, 10) as Review[]
-        setReviews(reviewsData)
+        })) as Review[]
+        const validRatings = reviewsData
+          .map((review: any) => Number(review.rating || review.score || 0))
+          .filter((rating) => rating > 0)
+        setReviewStats({
+          average: validRatings.length ? validRatings.reduce((sum, rating) => sum + rating, 0) / validRatings.length : 0,
+          total: validRatings.length,
+        })
+        setReviews(
+          reviewsData
+            .sort((a: any, b: any) => getDateTime(b.createdAt) - getDateTime(a.createdAt))
+            .slice(0, 10)
+        )
       } catch (error) {
         console.error('Error fetching reviews:', error)
       } finally {
@@ -402,8 +419,8 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
     )
   }
 
-  const averageRating = reviews.length > 0 ? reviews.reduce((sum, review: any) => sum + Number(review.rating || 0), 0) / reviews.length : Number(company.rating || 5.0)
-  const totalReviews = reviews.length || company.totalReviews || 0
+  const averageRating = reviewStats.total > 0 ? reviewStats.average : Number(company.rating || company.avaliacaoMedia || 5.0)
+  const totalReviews = reviewStats.total || Number(company.totalReviews || company.totalAvaliacoes || 0)
   const isOwnCompany = Boolean(userData?.companyId === company?.id)
   const isCompanyAccount = userData?.accountType === 'company' || userData?.accountType === 'empresa'
   const isCompanyTeamUser = Boolean(userData?.companyId) && ['owner', 'manager', 'employee', 'attendant', 'admin'].includes(String(userData?.role || ''))

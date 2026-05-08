@@ -16,7 +16,7 @@ import { Eye, EyeOff, Mail, Lock, Loader2, RefreshCw } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { signIn, signInWithGoogle, verifyTwoFactorLogin } = useAuth()
+  const { signIn, signInWithGoogle, verifyTwoFactorLogin, user, userData, loading: authLoading } = useAuth()
   const [showGoogleType, setShowGoogleType] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -35,6 +35,25 @@ export default function LoginPage() {
       router.replace('/auth/login')
     }
   }, [router])
+
+  useEffect(() => {
+    if (authLoading || !user || !userData || twoFactorRequired) return
+    if (typeof window !== 'undefined' && sessionStorage.getItem('twoFactorPending') === '1') return
+
+    const role = String((userData as any).role || '')
+    const accountType = String((userData as any).accountType || '')
+    if (accountType === 'pf' || role === 'client') {
+      router.replace('/cliente/dashboard')
+      return
+    }
+
+    if ((userData as any).companyId) {
+      router.replace('/dashboard')
+      return
+    }
+
+    router.replace('/dashboard/setup')
+  }, [authLoading, router, twoFactorRequired, user, userData])
 
   const handleRefreshApp = () => {
     window.location.reload()
