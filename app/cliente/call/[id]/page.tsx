@@ -1006,6 +1006,7 @@ export default function ClientCallPage() {
             audioSettings={company?.settings?.audioSettings}
             immersive
             initialLocalStream={localStream}
+            recordingLocalStream={callAudioGraphRef.current?.micStream || localStream}
             callMenuOptions={callBotOptions}
             selectedCallMenuOption={selectedOption}
             showMobileKeypad={mobileKeypadOpen}

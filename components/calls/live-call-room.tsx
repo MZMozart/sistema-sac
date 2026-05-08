@@ -34,6 +34,7 @@ interface LiveCallRoomProps {
   }
   immersive?: boolean
   initialLocalStream?: MediaStream | null
+  recordingLocalStream?: MediaStream | null
   callMenuOptions?: Array<{ digit?: string | number; label?: string; description?: string }>
   selectedCallMenuOption?: string | null
   showMobileKeypad?: boolean
@@ -46,7 +47,7 @@ const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
 }
 
-export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, companyLogoUrl, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption, onOpenMobileChat }: LiveCallRoomProps) {
+export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName, companyLogoUrl, currentUserId, currentUserName, mode, clientUserId, agentUserId, audioSettings, immersive = false, initialLocalStream = null, recordingLocalStream = null, callMenuOptions = [], selectedCallMenuOption = null, showMobileKeypad = false, onToggleMobileKeypad, onSelectCallMenuOption, onOpenMobileChat }: LiveCallRoomProps) {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -59,6 +60,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const audioContextRef = useRef<AudioContext | null>(null)
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null)
   const recordingSourcesRef = useRef<MediaStreamAudioSourceNode[]>([])
+  const attachedRecordingTrackIdsRef = useRef<Set<string>>(new Set())
   const localMuteStartedAtRef = useRef<number | null>(null)
   const mutedDurationRef = useRef(0)
   const connectionDropsRef = useRef(0)
@@ -77,6 +79,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   const attachStreamForRecording = (stream: MediaStream) => {
     if (!audioContextRef.current || !destinationRef.current) return
+    const audioTracks = stream.getAudioTracks()
+    if (!audioTracks.length) return
+    const uniqueKey = audioTracks.map((track) => track.id).sort().join('|')
+    if (attachedRecordingTrackIdsRef.current.has(uniqueKey)) return
+    attachedRecordingTrackIdsRef.current.add(uniqueKey)
     const source = audioContextRef.current.createMediaStreamSource(stream)
     source.connect(destinationRef.current)
     recordingSourcesRef.current.push(source)
@@ -101,8 +108,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       return
     }
     try {
-      const recorder = MediaRecorder.isTypeSupported('audio/webm')
-        ? new MediaRecorder(destinationRef.current.stream, { mimeType: 'audio/webm' })
+      const mimeType = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+      ].find((item) => MediaRecorder.isTypeSupported(item))
+      const recorder = mimeType
+        ? new MediaRecorder(destinationRef.current.stream, { mimeType })
         : new MediaRecorder(destinationRef.current.stream)
       recordedChunksRef.current = []
       recorder.ondataavailable = (event) => {
@@ -110,7 +122,10 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }
       recorder.start(1000)
       mediaRecorderRef.current = recorder
-      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'recording', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+      Promise.all([
+        setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'recording', recordingStartedBy: mode, updatedAt: serverTimestamp() }, { merge: true }),
+        setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'recording', recordingStartedBy: mode, updatedAt: serverTimestamp() }, { merge: true }),
+      ]).catch(() => null)
     } catch {
       setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'failed_to_start', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
       createAuditLog({
@@ -166,7 +181,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     if (!recordedChunksRef.current.length) {
       return getExistingRecordingUrl()
     }
-    const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
+      const blob = new Blob(recordedChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' })
     let recordingUrl: string | null = null
     try {
       const fileRef = ref(storage, `calls/${companyId}/${callId}/recording-${Date.now()}.webm`)
@@ -209,13 +224,13 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       protocol: auditProtocol,
       callId,
       channel: 'call',
-      eventType: 'call_recording_saved',
-      summary: 'Gravação da ligação salva com sucesso.',
-      metadata: { recordingUrl },
+        eventType: 'call_recording_saved',
+        summary: 'Gravação da ligação salva com sucesso.',
+      metadata: { recordingUrl, chunks: recordedChunksRef.current.length, size: blob.size, recordedBy: mode },
     })
     await Promise.all([
-      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true }),
-      setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true }),
+      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, recordingSize: blob.size, recordingChunkCount: recordedChunksRef.current.length, recordingSavedBy: mode, recordingSavedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true }),
+      setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, recordingSize: blob.size, recordingChunkCount: recordedChunksRef.current.length, recordingSavedBy: mode, recordingSavedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true }),
     ])
     return recordingUrl
   }
@@ -265,8 +280,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       await audioContextRef.current.close().catch(() => null)
     }
     audioContextRef.current = null
-    destinationRef.current = null
-    recordingSourcesRef.current = []
+      destinationRef.current = null
+      recordingSourcesRef.current = []
+      attachedRecordingTrackIdsRef.current.clear()
   }
 
   useEffect(() => {
@@ -294,7 +310,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   }, [muted])
 
   useEffect(() => {
-    if (status !== 'ended') return
+    if (status !== 'ended' && status !== 'post_service') return
     if (manualEndingRef.current) return
     stopRecorderAndUpload().catch(() => null)
   }, [status])
@@ -406,7 +422,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         return
       }
       destinationRef.current = audioContext.createMediaStreamDestination()
-      attachStreamForRecording(localStream)
+      attachStreamForRecording(recordingLocalStream || localStream)
       startRecording()
 
       const peerConnection = new RTCPeerConnection(rtcConfig)
@@ -421,7 +437,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
             remoteStream.addTrack(track)
           }
         })
-        attachStreamForRecording(incomingStream)
+        attachStreamForRecording(remoteStream)
         setRemoteAudioReady(true)
         event.track.onunmute = () => playRemoteAudio().catch(() => null)
         bindRemoteAudio()
@@ -533,7 +549,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
             const answerDescription = new RTCSessionDescription(data.answer)
             await peerConnection.setRemoteDescription(answerDescription)
           }
-          if (data?.status === 'ended') {
+          if (data?.status === 'ended' || data?.status === 'completed') {
             setStatus('ended')
           }
           if (data?.status === 'post_service') {
@@ -591,10 +607,11 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
         const unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
           if (!isCurrentRun()) return
-          if (snapshot.data()?.status === 'ended') {
+          const snapshotStatus = snapshot.data()?.status
+          if (snapshotStatus === 'ended' || snapshotStatus === 'completed') {
             setStatus('ended')
           }
-          if (snapshot.data()?.status === 'post_service') {
+          if (snapshotStatus === 'post_service') {
             setStatus('post_service')
           }
         })
@@ -616,7 +633,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     return () => {
       cleanupRoom().catch(() => null)
     }
-  }, [audioSettings?.inputDeviceId, callId, clientUserId, companyId, companyName, currentUserId, currentUserName, initialLocalStream, mode, retryToken, roomId])
+  }, [audioSettings?.inputDeviceId, callId, clientUserId, companyId, companyName, currentUserId, currentUserName, initialLocalStream, mode, recordingLocalStream, retryToken, roomId])
 
   useEffect(() => {
     if (!remoteAudioRef.current) return
