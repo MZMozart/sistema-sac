@@ -352,6 +352,35 @@ export default function ClientCallPage() {
   const enableAudio = async () => {
     let microphoneStream: MediaStream
     try {
+      const pendingAudio = (window as any).__atendeproPendingCallAudio
+      if (pendingAudio?.micStream) {
+        if (pendingAudio.context && pendingAudio.destination && pendingAudio.botGain) {
+          await pendingAudio.context.resume?.().catch(() => null)
+          pendingAudio.botGain.gain.value = botVoiceVolume
+          callAudioGraphRef.current = {
+            context: pendingAudio.context,
+            destination: pendingAudio.destination,
+            botGain: pendingAudio.botGain,
+            micStream: pendingAudio.micStream,
+          }
+          localCallStreamRef.current = pendingAudio.destination.stream
+          setLocalStream(pendingAudio.destination.stream)
+        } else {
+          microphoneStream = pendingAudio.micStream
+          localCallStreamRef.current = microphoneStream
+          setLocalStream(microphoneStream)
+        }
+        ;(window as any).__atendeproPendingCallAudio = null
+        setAudioEnabled(true)
+        setMobileCallPanel('call')
+        window.setTimeout(() => {
+          startInitialBotSpeech().catch(() => {
+            fallbackSpeakText(callBotSpeech || `Olá, você ligou para ${session?.companyName || 'a empresa'}.`).catch(() => null)
+          })
+        }, 250)
+        return
+      }
+
       microphoneStream = await requestMicrophoneStream()
       const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
       if (!AudioContextCtor) {

@@ -72,6 +72,37 @@ function speakCallBotNow(text: string) {
   window.speechSynthesis.speak(utterance)
 }
 
+async function prepareCallAudioGraph() {
+  const microphoneStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  })
+
+  const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+  if (!AudioContextCtor) {
+    ;(window as any).__atendeproPendingCallAudio = { micStream: microphoneStream }
+    return
+  }
+
+  const context = new AudioContextCtor()
+  await context.resume().catch(() => null)
+  const destination = context.createMediaStreamDestination()
+  const botGain = context.createGain()
+  botGain.gain.value = 1
+  context.createMediaStreamSource(microphoneStream).connect(destination)
+  botGain.connect(destination)
+  botGain.connect(context.destination)
+  ;(window as any).__atendeproPendingCallAudio = {
+    context,
+    destination,
+    botGain,
+    micStream: microphoneStream,
+  }
+}
+
 export default function EmpresaPage({ params }: { params: { id: string } }) {
   const { id } = params
   const router = useRouter()
@@ -263,22 +294,13 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
         try {
-          const permissionStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          })
-          permissionStream.getTracks().forEach((track) => track.stop())
+          await prepareCallAudioGraph()
         } catch {
           toast.error('Permita o microfone para iniciar a ligação.')
           setStartingCall(false)
           return
         }
       }
-
-      speakCallBotNow(buildCallBotSpeech(company))
 
       const callRef = doc(collection(db, 'call_sessions'))
       const callId = callRef.id
@@ -348,6 +370,10 @@ export default function EmpresaPage({ params }: { params: { id: string } }) {
 
       router.push(`/cliente/call/${callId}`)
     } catch (error) {
+      const pendingAudio = (window as any).__atendeproPendingCallAudio
+      pendingAudio?.micStream?.getTracks?.().forEach((track: MediaStreamTrack) => track.stop())
+      pendingAudio?.context?.close?.().catch(() => null)
+      ;(window as any).__atendeproPendingCallAudio = null
       console.error('Error starting call:', error)
       toast.error('Erro ao iniciar ligacao')
     } finally {
