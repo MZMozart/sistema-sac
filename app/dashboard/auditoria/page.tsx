@@ -211,7 +211,12 @@ export default function AuditoriaPage() {
                         <div className="flex items-center gap-2 text-sm"><PlayCircle className="h-4 w-4 text-primary" /> Reprodução da gravação</div>
                         <audio controls className="w-full" src={call.recordingUrl} data-testid={`call-recording-${item.id}`} />
                       </div>
-                    ) : <p className="mt-3 text-sm text-muted-foreground">Sem gravação disponível.</p>}
+                    ) : (
+                      <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <p>Sem gravação disponível.</p>
+                        {call.recordingError ? <p className="text-destructive">Falha: {call.recordingError}</p> : null}
+                      </div>
+                    )}
                   </div>
                 )
               })}

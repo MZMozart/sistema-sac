@@ -153,6 +153,11 @@ export default function AuditoriaProtocolPage() {
               <p>Tempo total da ligação: {formatSeconds(call?.duration || overview?.duration || 0)}</p>
               <p>Tempo silenciado: {formatSeconds(call?.muteDuration || call?.muteDurationSeconds || 0)}</p>
               <p>Status da gravação: {call?.recordingUrl ? 'gravada e disponível' : call?.recordingStatus || 'pendente'}</p>
+              {!call?.recordingUrl && call?.recordingError ? (
+                <p className="rounded-2xl border border-destructive/30 bg-destructive/5 p-3 text-destructive">
+                  Falha da gravação: {call.recordingError}
+                </p>
+              ) : null}
               {call?.recordingUrl ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-foreground"><PlayCircle className="h-4 w-4 text-primary" /> Gravação da ligação</div>

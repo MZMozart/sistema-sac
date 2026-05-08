@@ -60,6 +60,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
   const audioContextRef = useRef<AudioContext | null>(null)
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null)
   const recordingSourcesRef = useRef<MediaStreamAudioSourceNode[]>([])
+  const recordingKeepAliveRef = useRef<{ source: ConstantSourceNode; gain: GainNode } | null>(null)
   const attachedRecordingTrackIdsRef = useRef<Set<string>>(new Set())
   const localMuteStartedAtRef = useRef<number | null>(null)
   const mutedDurationRef = useRef(0)
@@ -87,6 +88,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     const source = audioContextRef.current.createMediaStreamSource(stream)
     source.connect(destinationRef.current)
     recordingSourcesRef.current.push(source)
+  }
+
+  const keepRecordingStreamAlive = () => {
+    if (!audioContextRef.current || !destinationRef.current || recordingKeepAliveRef.current) return
+    const source = audioContextRef.current.createConstantSource()
+    const gain = audioContextRef.current.createGain()
+    gain.gain.value = 0
+    source.connect(gain)
+    gain.connect(destinationRef.current)
+    source.start()
+    recordingKeepAliveRef.current = { source, gain }
   }
 
   const startRecording = () => {
@@ -303,10 +315,17 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       recorder.onstop = async () => {
         const url = await uploadRecording().catch(() => null)
         if (!url) {
-          await Promise.all([
-            setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }),
-            setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }),
-          ]).catch(() => null)
+          const [callSnapshot, roomSnapshot] = await Promise.all([
+            getDoc(doc(db, 'calls', callId)).catch(() => null),
+            getDoc(doc(db, 'call_sessions', roomId)).catch(() => null),
+          ])
+          const currentStatus = callSnapshot?.data()?.recordingStatus || roomSnapshot?.data()?.recordingStatus
+          if (currentStatus !== 'failed') {
+            await registerRecordingFailure('A gravação foi finalizada, mas nenhuma URL de áudio foi retornada.', {
+              recordingChunkCount: recordedChunksRef.current.length,
+              recordingSize: recordedChunksRef.current.reduce((total, chunk) => total + chunk.size, 0),
+            })
+          }
         }
         resolve(url)
       }
@@ -332,13 +351,19 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       await stopRecorderAndUpload().catch(() => null)
     }
     mediaRecorderRef.current = null
+    try {
+      recordingKeepAliveRef.current?.source.stop()
+    } catch {}
+    recordingKeepAliveRef.current?.source.disconnect()
+    recordingKeepAliveRef.current?.gain.disconnect()
+    recordingKeepAliveRef.current = null
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       await audioContextRef.current.close().catch(() => null)
     }
     audioContextRef.current = null
-      destinationRef.current = null
-      recordingSourcesRef.current = []
-      attachedRecordingTrackIdsRef.current.clear()
+    destinationRef.current = null
+    recordingSourcesRef.current = []
+    attachedRecordingTrackIdsRef.current.clear()
   }
 
   useEffect(() => {
@@ -478,6 +503,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         return
       }
       destinationRef.current = audioContext.createMediaStreamDestination()
+      keepRecordingStreamAlive()
       attachStreamForRecording(recordingLocalStream || localStream)
       startRecording()
 
