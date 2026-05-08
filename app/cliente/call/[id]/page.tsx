@@ -37,6 +37,8 @@ export default function ClientCallPage() {
   const [pendingHumanConfirmation, setPendingHumanConfirmation] = useState<any | null>(null)
   const [currentVisualCallNodeId, setCurrentVisualCallNodeId] = useState<string | null>(null)
   const spokenRef = useRef(false)
+  const initialSpeechInProgressRef = useRef(false)
+  const initialSpeechAttemptsRef = useRef(0)
   const autoStartedRef = useRef(false)
   const postServicePromptRef = useRef(false)
   const speakingRef = useRef(false)
@@ -256,9 +258,10 @@ export default function ClientCallPage() {
   }
 
   const startInitialBotSpeech = async () => {
-    if (!callBotSpeech || !session || session.status === 'ended' || spokenRef.current) return
+    if (!callBotSpeech || !session || session.status === 'ended' || spokenRef.current || initialSpeechInProgressRef.current) return
 
-    spokenRef.current = true
+    initialSpeechInProgressRef.current = true
+    initialSpeechAttemptsRef.current += 1
     await Promise.all([
       setDoc(doc(db, 'call_sessions', id), {
         callState: 'BOT_FLOW',
@@ -272,11 +275,16 @@ export default function ClientCallPage() {
       }, { merge: true }).catch(() => null),
     ])
 
-    await speakText(callBotSpeech)
-    await Promise.all([
-      setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
-      setDoc(doc(db, 'calls', session.callId || id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
-    ])
+    try {
+      await speakText(callBotSpeech)
+      spokenRef.current = true
+      await Promise.all([
+        setDoc(doc(db, 'call_sessions', id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
+        setDoc(doc(db, 'calls', session.callId || id), { callState: 'WAITING_INPUT', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null),
+      ])
+    } finally {
+      initialSpeechInProgressRef.current = false
+    }
   }
 
   const enableAudio = async () => {
@@ -332,6 +340,18 @@ export default function ClientCallPage() {
 
     return () => window.clearTimeout(timer)
   }, [audioEnabled, callBotSpeech, session])
+
+  useEffect(() => {
+    if (!audioEnabled || !callBotSpeech || !session || spokenRef.current || session.status === 'ended') return
+    const timer = window.setInterval(() => {
+      if (spokenRef.current || initialSpeechInProgressRef.current || initialSpeechAttemptsRef.current >= 3) {
+        window.clearInterval(timer)
+        return
+      }
+      startInitialBotSpeech().catch(() => null)
+    }, 2200)
+    return () => window.clearInterval(timer)
+  }, [audioEnabled, callBotSpeech, session?.id, session?.status])
 
   useEffect(() => {
     if (!audioEnabled || !session || session.callState !== 'POST_SERVICE' || postServicePromptRef.current) return
