@@ -103,7 +103,7 @@ export default function ClientCallPage() {
   }, [id, session?.id, session?.callId, session?.status, user?.uid])
 
   useEffect(() => {
-    if (['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) {
+    if (['waiting', 'active', 'ended', 'completed'].includes(session?.status)) {
       botStoppedRef.current = true
       speakingRef.current = false
     }
@@ -289,7 +289,7 @@ export default function ClientCallPage() {
       const graph = callAudioGraphRef.current
       if (graph) {
         await graph.context.resume().catch(() => null)
-        if (botStoppedRef.current || ['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) {
+        if (botStoppedRef.current || ['waiting', 'active', 'ended', 'completed'].includes(session?.status)) {
           speakingRef.current = false
           return
         }
@@ -325,7 +325,7 @@ export default function ClientCallPage() {
       .catch(() => undefined)
       .then(async () => {
         for (const chunk of chunks) {
-          if (botStoppedRef.current || ['waiting', 'ringing', 'active', 'ended', 'completed'].includes(session?.status)) break
+          if (botStoppedRef.current || ['waiting', 'active', 'ended', 'completed'].includes(session?.status)) break
           await playSpeechNow(chunk)
         }
       })
