@@ -211,6 +211,10 @@ export default function AuditoriaPage() {
                         <div className="flex items-center gap-2 text-sm"><PlayCircle className="h-4 w-4 text-primary" /> Reprodução da gravação</div>
                         <audio controls className="w-full" src={call.recordingUrl} data-testid={`call-recording-${item.id}`} />
                       </div>
+                    ) : call.recordingStorage === 'firestore-chunks' ? (
+                      <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
+                        Gravação salva em partes. Abra o protocolo para carregar o player.
+                      </div>
                     ) : (
                       <div className="mt-3 space-y-2 text-sm text-muted-foreground">
                         <p>Sem gravação disponível.</p>

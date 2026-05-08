@@ -51,6 +51,7 @@ export default function AuditoriaProtocolPage() {
   const [call, setCall] = useState<any>(null)
   const [messages, setMessages] = useState<any[]>([])
   const [callMessages, setCallMessages] = useState<any[]>([])
+  const [chunkedRecordingUrl, setChunkedRecordingUrl] = useState('')
   const [ratings, setRatings] = useState<any[]>([])
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export default function AuditoriaProtocolPage() {
       const callRow = callsSnap.empty ? null : { id: callsSnap.docs[0].id, ...(callsSnap.docs[0].data() as any) }
       let messageRows: any[] = []
       let callMessageRows: any[] = []
+      let chunkedRecording = ''
       if (chatRow?.id) {
         const messagesSnap = await getDocs(query(collection(db, 'messages'), where('chatId', '==', chatRow.id)))
         messageRows = messagesSnap.docs.map((item) => ({ id: item.id, ...(item.data() as any) })).sort((a, b) => toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime())
@@ -75,11 +77,22 @@ export default function AuditoriaProtocolPage() {
       if (callRow?.id) {
         const callMessagesSnap = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callRow.id)))
         callMessageRows = callMessagesSnap.docs.map((item) => ({ id: item.id, ...(item.data() as any) })).sort((a, b) => toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime())
+        if (callRow.recordingStorage === 'firestore-chunks') {
+          const chunksSnap = await getDocs(collection(db, 'calls', callRow.id, 'recording_chunks'))
+          const chunks = chunksSnap.docs
+            .map((item) => ({ id: item.id, ...(item.data() as any) }))
+            .sort((a, b) => Number(a.index || 0) - Number(b.index || 0))
+          if (chunks.length) {
+            const prefix = callRow.recordingDataPrefix || `data:${callRow.recordingMimeType || 'audio/webm'};base64`
+            chunkedRecording = `${prefix},${chunks.map((item) => item.data || '').join('')}`
+          }
+        }
       }
 
       setLogs(logsSnap.docs.map((item) => ({ id: item.id, ...(item.data() as any) })).sort((a, b) => toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime()))
       setChat(chatRow)
       setCall(callRow)
+      setChunkedRecordingUrl(chunkedRecording)
       setMessages(messageRows)
       setCallMessages(callMessageRows)
       setRatings(ratingsSnap.docs.map((item) => ({ id: item.id, ...(item.data() as any) })))
@@ -90,6 +103,7 @@ export default function AuditoriaProtocolPage() {
   }, [company?.id, protocol])
 
   const overview = useMemo(() => chat || call || null, [chat, call])
+  const recordingSrc = call?.recordingUrl || chunkedRecordingUrl
   const displayLogs = useMemo(() => {
     const seen = new Set<string>()
     return logs.filter((item) => {
@@ -152,16 +166,16 @@ export default function AuditoriaProtocolPage() {
               <p>Arquivos trocados na ligação: {call?.callChatAttachmentCount ?? callMessages.filter((item) => item.fileUrl).length}</p>
               <p>Tempo total da ligação: {formatSeconds(call?.duration || overview?.duration || 0)}</p>
               <p>Tempo silenciado: {formatSeconds(call?.muteDuration || call?.muteDurationSeconds || 0)}</p>
-              <p>Status da gravação: {call?.recordingUrl ? 'gravada e disponível' : call?.recordingStatus || 'pendente'}</p>
-              {!call?.recordingUrl && call?.recordingError ? (
+              <p>Status da gravação: {recordingSrc ? 'gravada e disponível' : call?.recordingStatus || 'pendente'}</p>
+              {!recordingSrc && call?.recordingError ? (
                 <p className="rounded-2xl border border-destructive/30 bg-destructive/5 p-3 text-destructive">
                   Falha da gravação: {call.recordingError}
                 </p>
               ) : null}
-              {call?.recordingUrl ? (
+              {recordingSrc ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-foreground"><PlayCircle className="h-4 w-4 text-primary" /> Gravação da ligação</div>
-                  <audio controls className="w-full" src={call.recordingUrl} data-testid="audit-protocol-recording" />
+                  <audio controls className="w-full" src={recordingSrc} data-testid="audit-protocol-recording" />
                 </div>
               ) : null}
             </CardContent>

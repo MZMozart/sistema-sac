@@ -254,11 +254,70 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
   const saveRecordingInline = async (blob: Blob) => {
     const maxInlineSize = 850 * 1024
+    const recordingUrl = await blobToDataUrl(blob)
+    const [prefix, base64Payload = ''] = recordingUrl.split(',')
+
     if (blob.size > maxInlineSize) {
-      throw new Error('Arquivo maior que o limite do fallback local. Ative o Firebase Storage para gravar chamadas longas.')
+      const chunkSize = 650000
+      const chunks = []
+      for (let index = 0; index < base64Payload.length; index += chunkSize) {
+        chunks.push(base64Payload.slice(index, index + chunkSize))
+      }
+
+      await Promise.all(chunks.map((chunk, index) => setDoc(doc(db, 'calls', callId, 'recording_chunks', String(index).padStart(4, '0')), {
+        index,
+        data: chunk,
+        createdAt: serverTimestamp(),
+      })))
+
+      await Promise.all([
+        setDoc(doc(db, 'calls', callId), {
+          recordingRequired: true,
+          recordingStatus: 'saved',
+          recordingUrl: null,
+          recordingStorage: 'firestore-chunks',
+          recordingChunkDocCount: chunks.length,
+          recordingMimeType: blob.type || 'audio/webm',
+          recordingDataPrefix: prefix || 'data:audio/webm;base64',
+          recordingSize: blob.size,
+          recordingChunkCount: recordedChunksRef.current.length,
+          recordingSavedBy: mode,
+          recordingSavedAt: serverTimestamp(),
+          recordingWarning: 'Gravação salva em partes no Firestore porque o bucket do Firebase Storage não está disponível.',
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+        setDoc(doc(db, 'call_sessions', roomId), {
+          recordingRequired: true,
+          recordingStatus: 'saved',
+          recordingUrl: null,
+          recordingStorage: 'firestore-chunks',
+          recordingChunkDocCount: chunks.length,
+          recordingMimeType: blob.type || 'audio/webm',
+          recordingDataPrefix: prefix || 'data:audio/webm;base64',
+          recordingSize: blob.size,
+          recordingChunkCount: recordedChunksRef.current.length,
+          recordingSavedBy: mode,
+          recordingSavedAt: serverTimestamp(),
+          recordingWarning: 'Gravação salva em partes no Firestore porque o bucket do Firebase Storage não está disponível.',
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+        createAuditLog({
+          companyId,
+          companyName,
+          clientId: clientUserId || null,
+          employeeId: agentUserId || currentUserId,
+          protocol: auditProtocol,
+          callId,
+          channel: 'call',
+          eventType: 'call_recording_saved',
+          summary: 'Gravação da ligação salva no protocolo em partes pelo fallback local.',
+          metadata: { recordedBy: mode, size: blob.size, chunkCount: chunks.length, storage: 'firestore-chunks' },
+        }),
+      ])
+
+      return `firestore-chunks:${callId}`
     }
 
-    const recordingUrl = await blobToDataUrl(blob)
     await Promise.all([
       setDoc(doc(db, 'calls', callId), {
         recordingRequired: true,
@@ -342,6 +401,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
     if (!recordingUrl) {
       return getExistingRecordingUrl()
+    }
+    if (recordingUrl.startsWith('firestore-chunks:')) {
+      return recordingUrl
     }
     await createAuditLog({
       companyId,
@@ -907,16 +969,19 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }).catch(() => null)
       return null
     })
-    const recordingUrl = savedRecordingUrl || await getExistingRecordingUrl()
+    const recordingSavedInChunks = Boolean(savedRecordingUrl?.startsWith('firestore-chunks:'))
+    const recordingUrl = recordingSavedInChunks ? '' : savedRecordingUrl || await getExistingRecordingUrl()
     const [currentCallSnapshot, currentRoomSnapshot] = await Promise.all([
       getDoc(callRef).catch(() => null),
       getDoc(roomRef).catch(() => null),
     ])
     const currentRecordingStatus = currentCallSnapshot?.data()?.recordingStatus || currentRoomSnapshot?.data()?.recordingStatus
     const currentRecordingError = currentCallSnapshot?.data()?.recordingError || currentRoomSnapshot?.data()?.recordingError || null
-    const recordingStatus = recordingUrl ? 'saved' : currentRecordingStatus === 'failed' ? 'failed' : 'not_saved'
+    const recordingStatus = recordingUrl || recordingSavedInChunks ? 'saved' : currentRecordingStatus === 'failed' ? 'failed' : 'not_saved'
     const recordingPayload = recordingUrl
       ? { recordingUrl, recordingStatus }
+      : recordingSavedInChunks
+      ? { recordingStatus, recordingUrl: null, recordingStorage: 'firestore-chunks' }
       : {
           recordingStatus,
           ...(currentRecordingError ? { recordingError: currentRecordingError } : {}),
