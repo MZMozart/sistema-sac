@@ -154,8 +154,18 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     }
   }
 
+  const getExistingRecordingUrl = async () => {
+    const [callSnapshot, roomSnapshot] = await Promise.all([
+      getDoc(doc(db, 'calls', callId)).catch(() => null),
+      getDoc(doc(db, 'call_sessions', roomId)).catch(() => null),
+    ])
+    return String(callSnapshot?.data()?.recordingUrl || roomSnapshot?.data()?.recordingUrl || '')
+  }
+
   const uploadRecording = async () => {
-    if (!recordedChunksRef.current.length) return null
+    if (!recordedChunksRef.current.length) {
+      return getExistingRecordingUrl()
+    }
     const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
     let recordingUrl: string | null = null
     try {
@@ -188,7 +198,9 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
         }).catch(() => null)
       }
     }
-    if (!recordingUrl) return null
+    if (!recordingUrl) {
+      return getExistingRecordingUrl()
+    }
     await createAuditLog({
       companyId,
       companyName,
@@ -201,7 +213,10 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       summary: 'Gravação da ligação salva com sucesso.',
       metadata: { recordingUrl },
     })
-    await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true })
+    await Promise.all([
+      setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true }),
+      setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'saved', recordingUrl, updatedAt: serverTimestamp() }, { merge: true }),
+    ])
     return recordingUrl
   }
 
@@ -209,7 +224,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
     if (recordingFinalizedRef.current) return null
     const recorder = mediaRecorderRef.current
     if (!recorder) {
-      return null
+      return getExistingRecordingUrl()
     }
     recordingFinalizedRef.current = true
 
@@ -217,7 +232,10 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       recorder.onstop = async () => {
         const url = await uploadRecording().catch(() => null)
         if (!url) {
-          await setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }).catch(() => null)
+          await Promise.all([
+            setDoc(doc(db, 'calls', callId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }),
+            setDoc(doc(db, 'call_sessions', roomId), { recordingRequired: true, recordingStatus: 'not_saved', updatedAt: serverTimestamp() }, { merge: true }),
+          ]).catch(() => null)
         }
         resolve(url)
       }
@@ -714,7 +732,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
     peerConnectionRef.current?.close()
 
-    const recordingUrl = await stopRecorderAndUpload().catch(async (error) => {
+    const savedRecordingUrl = await stopRecorderAndUpload().catch(async (error) => {
       await createAuditLog({
         companyId,
         companyName,
@@ -731,6 +749,8 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }).catch(() => null)
       return null
     })
+    const recordingUrl = savedRecordingUrl || await getExistingRecordingUrl()
+    const recordingStatus = recordingUrl ? 'saved' : 'not_saved'
 
     const callMessagesSnapshot = await getDocs(query(collection(db, 'call_messages'), where('callId', '==', callId))).catch(() => null)
     const callMessages = callMessagesSnapshot?.docs.map((item) => item.data() as any) || []
@@ -738,7 +758,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
 
     await Promise.all([
       setDoc(roomRef, {
-        recordingStatus: recordingUrl ? 'saved' : 'not_saved',
+        recordingStatus,
         recordingUrl: recordingUrl || null,
         callChatMessageCount: callMessages.length,
         callChatAttachmentCount: callFiles,
@@ -746,7 +766,7 @@ export function LiveCallRoom({ roomId, callId, protocol, companyId, companyName,
       }, { merge: true }).catch(() => null),
       setDoc(callRef, {
         recordingUrl: recordingUrl || null,
-        recordingStatus: recordingUrl ? 'saved' : 'not_saved',
+        recordingStatus,
         callChatMessageCount: callMessages.length,
         callChatAttachmentCount: callFiles,
         updatedAt: serverTimestamp(),

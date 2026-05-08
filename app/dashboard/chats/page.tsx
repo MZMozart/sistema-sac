@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp, updateDoc, doc, where, increment } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+import { db, storage } from '@/lib/firebase'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { createNotification } from '@/lib/notifications'
 import { createAuditLog } from '@/lib/audit'
 import { rebalanceChatQueue } from '@/lib/chat-queue'
@@ -15,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ArrowLeft, ArrowRightLeft, Bot, CheckCircle2, ChevronDown, Clock, Info, MessageSquare, Send, UserRound, XCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRightLeft, Bot, CheckCircle2, ChevronDown, Clock, Info, MessageSquare, Paperclip, Send, UserRound, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { buildSectorOptions, DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME } from '@/lib/sectors'
 
@@ -68,6 +69,10 @@ type MessageRecord = {
   senderName?: string
   content?: string
   message?: string
+  fileName?: string | null
+  fileUrl?: string | null
+  fileType?: string | null
+  fileSize?: number | null
   createdAt?: any
   timestamp?: any
 }
@@ -94,6 +99,7 @@ export default function ChatsPage() {
   const [transferSearch, setTransferSearch] = useState('')
   const [transferringUserId, setTransferringUserId] = useState<string | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const targetChat = searchParams.get('chat')
@@ -262,6 +268,74 @@ export default function ChatsPage() {
       setMessage('')
     } catch {
       toast.error('Não foi possível enviar a mensagem.')
+    }
+  }
+
+  const sendFile = async (file: File | null) => {
+    if (!selectedChat || !file || !user) return
+    try {
+      const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '-')}`
+      const fileRef = ref(storage, `chat-files/${selectedChat.companyId}/${selectedChat.id}/${safeName}`)
+      await uploadBytes(fileRef, file)
+      const fileUrl = await getDownloadURL(fileRef)
+      const fileName = file.name
+
+      await addDoc(collection(db, 'messages'), {
+        chatId: selectedChat.id,
+        companyId: selectedChat.companyId,
+        content: fileName,
+        type: 'file',
+        fileName,
+        fileUrl,
+        fileType: file.type || null,
+        fileSize: file.size,
+        senderType: 'employee',
+        senderId: user.uid,
+        senderName: user.displayName || 'Atendente',
+        createdAt: serverTimestamp(),
+      })
+
+      await updateDoc(doc(db, 'chats', selectedChat.id), {
+        employeeId: selectedChat.employeeId || user.uid,
+        status: 'active',
+        queuePosition: null,
+        lastMessage: `Arquivo: ${fileName}`,
+        lastMessageAt: serverTimestamp(),
+        unreadCount: 0,
+      })
+      await rebalanceChatQueue(selectedChat.companyId)
+
+      await createNotification({
+        recipientUserId: selectedChat.clientId,
+        title: 'Novo arquivo da empresa',
+        body: `${user.displayName || 'Atendente'} enviou ${fileName} no protocolo ${selectedChat.protocolo}.`,
+        type: 'chat',
+        actionUrl: `/cliente/chat/${selectedChat.id}`,
+        entityId: selectedChat.id,
+        entityType: 'chat',
+        actorName: user.displayName || 'Atendente',
+      })
+
+      await createAuditLog({
+        companyId: selectedChat.companyId,
+        companyName: selectedChat.companyName,
+        protocol: selectedChat.protocolo,
+        chatId: selectedChat.id,
+        channel: 'chat',
+        eventType: 'chat_file_shared',
+        employeeId: user.uid,
+        employeeName: user.displayName || 'Atendente',
+        clientId: selectedChat.clientId,
+        clientName: selectedChat.clientName || null,
+        summary: 'Atendente enviou um arquivo no chat.',
+        metadata: { fileName, fileUrl, fileType: file.type || null, fileSize: file.size },
+      })
+
+      toast.success('Arquivo enviado com sucesso.')
+    } catch {
+      toast.error('Não foi possível enviar o arquivo.')
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -601,6 +675,17 @@ export default function ChatsPage() {
                         <div className={`max-w-[75%] rounded-3xl px-4 py-3 shadow-sm ${bubble}`} data-testid={`dashboard-chat-message-${msg.id}`}>
                           <div className="mb-1 text-[11px] uppercase tracking-[0.2em] opacity-70">{msg.senderName || msg.senderType}</div>
                           <p className="text-sm whitespace-pre-wrap">{msg.content || msg.message || ''}</p>
+                          {msg.fileUrl ? (
+                            <a
+                              href={msg.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-3 inline-flex items-center rounded-full border border-current/20 px-3 py-1.5 text-xs font-medium underline-offset-4 hover:underline"
+                              data-testid={`dashboard-chat-file-${msg.id}`}
+                            >
+                              Abrir arquivo: {msg.fileName || 'anexo'}
+                            </a>
+                          ) : null}
                         </div>
                       </div>
                     )
@@ -609,6 +694,23 @@ export default function ChatsPage() {
               </div>
               <div className="shrink-0 border-t border-border p-4">
                 <div className="flex gap-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(event) => sendFile(event.target.files?.[0] || null)}
+                    data-testid="dashboard-chat-file-input"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    disabled={!selectedChat}
+                    onClick={() => fileInputRef.current?.click()}
+                    data-testid="dashboard-chat-attach-button"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
                   <Input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && sendMessage()} placeholder="Digite sua resposta para o cliente" data-testid="dashboard-chat-message-input" />
                   <Button onClick={sendMessage} data-testid="dashboard-chat-send-button"><Send className="h-4 w-4" /></Button>
                 </div>

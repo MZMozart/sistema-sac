@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, ArrowLeft, Building2, Check, CheckCheck, User, Bot, Paperclip, Send } from 'lucide-react';
 import { toast } from 'sonner';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import {
   doc,
   getDoc,
@@ -27,6 +27,7 @@ import {
   getDocs,
   limit
 } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { formatTime } from '@/lib/utils';
 import { createNotification } from '@/lib/notifications';
 import { createAuditLog } from '@/lib/audit';
@@ -94,6 +95,7 @@ export default function ClientChatPage() {
   const [ratingSaved, setRatingSaved] = useState(false);
   const [savingRating, setSavingRating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const botButtons = useMemo(() => getChatFlowButtons(company, chat), [company, chat]);
   const isStructuredBotFlow = Boolean(chat?.status === 'bot' && botButtons.length > 0 && !(chat as any)?.botAwaitingResolvedConfirmation && !(chat as any)?.botAwaitingAnythingElse)
@@ -539,6 +541,82 @@ export default function ClientChatPage() {
     }
   };
 
+  const handleSendFile = async (file: File | null) => {
+    if (!file || !user || !chat) return
+    if (isStructuredBotFlow) {
+      toast.info('Use os botões do BOT para seguir o fluxo deste atendimento.')
+      return
+    }
+
+    setSending(true)
+    try {
+      const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '-')}`
+      const fileRef = ref(storage, `chat-files/${chat.companyId}/${id}/${safeName}`)
+      await uploadBytes(fileRef, file)
+      const fileUrl = await getDownloadURL(fileRef)
+      const fileName = file.name
+
+      await addDoc(collection(db, 'messages'), {
+        chatId: id,
+        companyId: chat.companyId,
+        content: fileName,
+        type: 'file',
+        fileName,
+        fileUrl,
+        fileType: file.type || null,
+        fileSize: file.size,
+        senderType: 'client',
+        senderId: user.uid,
+        senderName: userData?.fullName || user.displayName || 'Cliente',
+        senderPhotoURL: user.photoURL || null,
+        createdAt: serverTimestamp(),
+        read: false,
+      })
+
+      await updateDoc(doc(db, 'chats', id), {
+        lastMessage: `Arquivo: ${fileName}`,
+        lastMessageAt: serverTimestamp(),
+        lastActivity: serverTimestamp(),
+        inactiveActor: null,
+        inactiveDurationSeconds: 0,
+        status: chat.status === 'closed' ? 'closed' : chat.status,
+      })
+
+      await createNotification({
+        recipientCompanyId: chat.companyId,
+        recipientUserId: chat.employeeId || undefined,
+        title: 'Novo arquivo no chat',
+        body: `${userData?.fullName || user.displayName || 'Cliente'} enviou ${fileName} no protocolo ${chat.protocolo}.`,
+        type: 'chat',
+        actionUrl: `/dashboard/chats?chat=${id}`,
+        entityId: id,
+        entityType: 'chat',
+      })
+
+      await createAuditLog({
+        companyId: chat.companyId,
+        companyName: company?.nomeFantasia || company?.razaoSocial || chat.companyName,
+        protocol: chat.protocolo,
+        chatId: id,
+        channel: 'chat',
+        eventType: 'chat_file_shared',
+        clientId: user.uid,
+        clientName: userData?.fullName || user.displayName || 'Cliente',
+        employeeId: chat.employeeId || null,
+        employeeName: (chat as any).employeeName || null,
+        summary: 'Cliente enviou um arquivo no chat.',
+        metadata: { fileName, fileUrl, fileType: file.type || null, fileSize: file.size },
+      })
+
+      toast.success('Arquivo enviado com sucesso.')
+    } catch {
+      toast.error('Não foi possível enviar o arquivo agora.')
+    } finally {
+      setSending(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const handleBotButtonClick = async (button: any) => {
     if (!user || !chat || !company) return
     setSending(true)
@@ -964,6 +1042,17 @@ export default function ClientChatPage() {
                       <p className="text-xs font-medium mb-1 opacity-70">{message.senderName}</p>
                     )}
                     <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                    {(message as any).fileUrl ? (
+                      <a
+                        href={(message as any).fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex items-center rounded-full border border-current/20 px-3 py-1.5 text-xs font-medium underline-offset-4 hover:underline"
+                        data-testid={`client-chat-file-${message.id}`}
+                      >
+                        Abrir arquivo: {(message as any).fileName || 'anexo'}
+                      </a>
+                    ) : null}
                     {isClient && (
                       <div className="flex items-center gap-1 mt-1 justify-end">
                         <span className="text-[10px] opacity-60">
@@ -1004,7 +1093,22 @@ export default function ClientChatPage() {
             }}
             className="flex items-center gap-2"
           >
-            <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => handleSendFile(event.target.files?.[0] || null)}
+              data-testid="client-chat-file-input"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              disabled={sending || isStructuredBotFlow}
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="client-chat-attach-button"
+            >
               <Paperclip className="w-5 h-5" />
             </Button>
 
