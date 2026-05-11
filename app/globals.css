@@ -144,9 +144,6 @@ html {
   scrollbar-width: thin;
 }
 
-html.desktop-shell {
-  --safe-area-top: 30px;
-}
 
 body {
   min-height: 100vh;
