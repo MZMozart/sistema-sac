@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { PwaRegister } from "@/components/pwa-register";
 import { AuthProvider } from "@/contexts/auth-context";
 import { ThemeProvider } from "@/contexts/theme-context";
+import { DesktopWindowFrame } from "@/components/desktop-window-frame";
 
 const headingFont = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -53,6 +54,7 @@ export default function RootLayout({
       <body className={`${headingFont.variable} ${bodyFont.variable} ${monoFont.variable} antialiased`}>
         <ThemeProvider>
           <AuthProvider>
+            <DesktopWindowFrame />
             {children}
             <div id="portal-root" />
             <PwaRegister />

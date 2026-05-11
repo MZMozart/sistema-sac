@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
 const path = require('path')
 
 const isDev = !app.isPackaged
@@ -13,7 +13,7 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 760,
     backgroundColor: '#050b17',
-    titleBarStyle: 'hiddenInset',
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -33,6 +33,25 @@ function createWindow() {
     window.webContents.openDevTools({ mode: 'detach' })
   }
 }
+
+ipcMain.handle('window:minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+
+ipcMain.handle('window:toggle-maximize', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window) return false
+  if (window.isMaximized()) {
+    window.unmaximize()
+    return false
+  }
+  window.maximize()
+  return true
+})
+
+ipcMain.handle('window:close', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close()
+})
 
 app.whenReady().then(() => {
   createWindow()
