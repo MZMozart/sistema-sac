@@ -144,10 +144,6 @@ html {
   scrollbar-width: thin;
 }
 
-html.desktop-shell {
-  --safe-area-top: 2.25rem;
-}
-
 body {
   min-height: 100vh;
   min-height: 100svh;
@@ -181,44 +177,6 @@ body::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb:hover,
 *::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, var(--primary), var(--chart-2));
-}
-
-.desktop-titlebar {
-  -webkit-app-region: drag;
-}
-
-.desktop-titlebar-drag {
-  -webkit-app-region: drag;
-}
-
-.desktop-window-controls,
-.desktop-window-button {
-  -webkit-app-region: no-drag;
-}
-
-.desktop-window-button {
-  display: inline-flex;
-  height: 1.75rem;
-  width: 2.5rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.75rem;
-  color: var(--muted-foreground);
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
-}
-
-.desktop-window-button:hover {
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--foreground);
-}
-
-.desktop-window-button:active {
-  transform: scale(0.96);
-}
-
-.desktop-window-button-close:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
 }
 
 .safe-fixed-top {

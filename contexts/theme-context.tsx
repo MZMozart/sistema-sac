@@ -36,6 +36,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setResolvedTheme(resolved)
       root.classList.remove('light', 'dark')
       root.classList.add(resolved)
+      ;(window as any).desktopShell?.setTheme?.(resolved)
     }
 
     updateTheme()

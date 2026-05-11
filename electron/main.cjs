@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, nativeTheme, shell } = require('electron')
 const path = require('path')
 
 const isDev = !app.isPackaged
 const productionUrl = 'https://atendepro-tcc.vercel.app'
 const desktopUrl = process.env.ELECTRON_START_URL || process.env.ELECTRON_APP_URL || (isDev ? 'http://localhost:3000' : productionUrl)
 const loginUrl = new URL('/auth/login', desktopUrl).toString()
+
+nativeTheme.themeSource = 'dark'
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -13,7 +15,6 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 760,
     backgroundColor: '#050b17',
-    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -34,23 +35,12 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('window:minimize', (event) => {
-  BrowserWindow.fromWebContents(event.sender)?.minimize()
-})
-
-ipcMain.handle('window:toggle-maximize', (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (!window) return false
-  if (window.isMaximized()) {
-    window.unmaximize()
-    return false
-  }
-  window.maximize()
-  return true
-})
-
-ipcMain.handle('window:close', (event) => {
-  BrowserWindow.fromWebContents(event.sender)?.close()
+ipcMain.on('window:set-theme', (_event, theme) => {
+  nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
+  const backgroundColor = theme === 'light' ? '#f6f8fc' : '#050b17'
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.setBackgroundColor(backgroundColor)
+  })
 })
 
 app.whenReady().then(() => {
