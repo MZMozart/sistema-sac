@@ -8,13 +8,41 @@ const loginUrl = new URL('/auth/login', desktopUrl).toString()
 
 nativeTheme.themeSource = 'dark'
 
+function getWindowTheme(theme) {
+  const dark = theme !== 'light'
+  return {
+    backgroundColor: dark ? '#050b17' : '#f6f8fc',
+    titleBarColor: dark ? '#050b17' : '#f6f8fc',
+    symbolColor: dark ? '#94a3b8' : '#334155',
+  }
+}
+
+function applyWindowTheme(window, theme) {
+  const colors = getWindowTheme(theme)
+  window.setBackgroundColor(colors.backgroundColor)
+  if (typeof window.setTitleBarOverlay === 'function') {
+    window.setTitleBarOverlay({
+      color: colors.titleBarColor,
+      symbolColor: colors.symbolColor,
+      height: 30,
+    })
+  }
+}
+
 function createWindow() {
+  const colors = getWindowTheme('dark')
   const window = new BrowserWindow({
     width: 1540,
     height: 980,
     minWidth: 1200,
     minHeight: 760,
-    backgroundColor: '#050b17',
+    backgroundColor: colors.backgroundColor,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: colors.titleBarColor,
+      symbolColor: colors.symbolColor,
+      height: 30,
+    },
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -28,6 +56,7 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  applyWindowTheme(window, 'dark')
   window.loadURL(loginUrl)
 
   if (isDev) {
@@ -37,9 +66,8 @@ function createWindow() {
 
 ipcMain.on('window:set-theme', (_event, theme) => {
   nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
-  const backgroundColor = theme === 'light' ? '#f6f8fc' : '#050b17'
   BrowserWindow.getAllWindows().forEach((window) => {
-    window.setBackgroundColor(backgroundColor)
+    applyWindowTheme(window, theme)
   })
 })
 
