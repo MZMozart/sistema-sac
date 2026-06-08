@@ -1,6 +1,6 @@
 import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { DEFAULT_SECTOR_ID, normalizeSectorId } from '@/lib/sectors'
+import { DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME, inferSectorFromText, normalizeSectorId } from '@/lib/sectors'
 
 function toDateValue(value: any) {
   if (!value) return new Date(0)
@@ -8,6 +8,14 @@ function toDateValue(value: any) {
   if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000)
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? new Date(0) : parsed
+}
+
+function resolveCallSector(call: any) {
+  const inferred = inferSectorFromText(call.queueSectorName, call.setor_nome, call.selectedOptionLabel, call.selectedOptionDescription, call.queueReason)
+  const currentId = normalizeSectorId(call.queueSectorId || call.setor_id || DEFAULT_SECTOR_ID)
+  const sectorId = currentId !== DEFAULT_SECTOR_ID ? currentId : inferred?.sectorId || currentId
+  const sectorName = call.queueSectorName || call.setor_nome || inferred?.sectorName || DEFAULT_SECTOR_NAME
+  return { sectorId, sectorName }
 }
 
 export async function rebalanceCallQueue(companyId: string) {
@@ -52,12 +60,12 @@ export async function rebalanceCallQueue(companyId: string) {
 
   const sectorPositions = new Map<string, number>()
   waitingCalls.forEach((call) => {
-    const sectorId = normalizeSectorId(call.queueSectorId || call.setor_id || DEFAULT_SECTOR_ID)
+    const { sectorId, sectorName } = resolveCallSector(call)
     const nextPosition = (sectorPositions.get(sectorId) || 0) + 1
     sectorPositions.set(sectorId, nextPosition)
-    if (call.queuePosition !== nextPosition || call.queueSectorId !== sectorId) {
-      updates.push(updateDoc(doc(db, 'call_sessions', call.id), { queuePosition: nextPosition, queueSectorId: sectorId }))
-      updates.push(updateDoc(doc(db, 'calls', call.callId || call.id), { queuePosition: nextPosition, queueSectorId: sectorId }))
+    if (call.queuePosition !== nextPosition || call.queueSectorId !== sectorId || call.queueSectorName !== sectorName) {
+      updates.push(updateDoc(doc(db, 'call_sessions', call.id), { queuePosition: nextPosition, queueSectorId: sectorId, queueSectorName: sectorName, setor_id: sectorId, setor_nome: sectorName }))
+      updates.push(updateDoc(doc(db, 'calls', call.callId || call.id), { queuePosition: nextPosition, queueSectorId: sectorId, queueSectorName: sectorName, setor_id: sectorId, setor_nome: sectorName }))
     }
   })
 
