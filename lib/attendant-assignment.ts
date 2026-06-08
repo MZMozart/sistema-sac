@@ -1,6 +1,6 @@
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME, normalizeSectorId, normalizeSectorName } from '@/lib/sectors'
+import { DEFAULT_SECTOR_ID, DEFAULT_SECTOR_NAME, normalizeSectorId, normalizeSectorName, sectorMatches } from '@/lib/sectors'
 
 type AssignmentChannel = 'chat' | 'call'
 
@@ -23,8 +23,9 @@ function loadForChannel(channel: AssignmentChannel, employee: any, chats: any[],
   return chats.filter((chat) => chat.employeeId === employee.userId && ['active', 'waiting', 'pending_resolution'].includes(chat.status)).length
 }
 
-export async function assignLeastLoadedAttendant(companyId: string, channel: AssignmentChannel = 'chat', sectorId?: string | null) {
+export async function assignLeastLoadedAttendant(companyId: string, channel: AssignmentChannel = 'chat', sectorId?: string | null, sectorName?: string | null) {
   const targetSectorId = normalizeSectorId(sectorId)
+  const targetSectorName = normalizeSectorName(sectorName)
   const [employeesSnapshot, chatsSnapshot, callsSnapshot] = await Promise.all([
     getDocs(query(collection(db, 'employees'), where('companyId', '==', companyId))),
     getDocs(query(collection(db, 'chats'), where('companyId', '==', companyId))),
@@ -35,10 +36,13 @@ export async function assignLeastLoadedAttendant(companyId: string, channel: Ass
     .map((item) => ({ id: item.id, ...(item.data() as any) }))
     .filter(isActiveEmployee)
 
-  const sectorEmployees = targetSectorId === DEFAULT_SECTOR_ID
+  const sectorEmployees = targetSectorId === DEFAULT_SECTOR_ID && targetSectorName === DEFAULT_SECTOR_NAME
     ? allEmployees
-    : allEmployees.filter((employee) => employeeSectorId(employee) === targetSectorId)
-  const employees = sectorEmployees.length > 0 ? sectorEmployees : allEmployees
+    : allEmployees.filter((employee) => sectorMatches(
+        { id: targetSectorId, name: targetSectorName },
+        { id: employeeSectorId(employee), name: employeeSectorName(employee) }
+      ))
+  const employees = sectorEmployees
   const chats = chatsSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
   const calls = callsSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
 
@@ -48,7 +52,7 @@ export async function assignLeastLoadedAttendant(companyId: string, channel: Ass
       load: loadForChannel(channel, employee, chats, calls),
       sectorId: employeeSectorId(employee),
       sectorName: employeeSectorName(employee),
-      usedFallback: targetSectorId !== DEFAULT_SECTOR_ID && employeeSectorId(employee) !== targetSectorId,
+      usedFallback: false,
     }))
     .sort((a, b) => a.load - b.load || String(a.employee.name || '').localeCompare(String(b.employee.name || ''), 'pt-BR'))
 
@@ -56,7 +60,7 @@ export async function assignLeastLoadedAttendant(companyId: string, channel: Ass
     employee: null,
     load: 0,
     sectorId: targetSectorId,
-    sectorName: targetSectorId === DEFAULT_SECTOR_ID ? DEFAULT_SECTOR_NAME : DEFAULT_SECTOR_NAME,
+    sectorName: targetSectorName,
     usedFallback: false,
   }
 }
