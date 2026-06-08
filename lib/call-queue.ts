@@ -13,8 +13,9 @@ function toDateValue(value: any) {
 function resolveCallSector(call: any) {
   const inferred = inferSectorFromText(call.queueSectorName, call.setor_nome, call.selectedOptionLabel, call.selectedOptionDescription, call.queueReason)
   const currentId = normalizeSectorId(call.queueSectorId || call.setor_id || DEFAULT_SECTOR_ID)
+  const currentName = call.queueSectorName || call.setor_nome || DEFAULT_SECTOR_NAME
   const sectorId = currentId !== DEFAULT_SECTOR_ID ? currentId : inferred?.sectorId || currentId
-  const sectorName = call.queueSectorName || call.setor_nome || inferred?.sectorName || DEFAULT_SECTOR_NAME
+  const sectorName = currentName !== DEFAULT_SECTOR_NAME ? currentName : inferred?.sectorName || currentName
   return { sectorId, sectorName }
 }
 
